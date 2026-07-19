@@ -636,6 +636,7 @@ def stream_uploaded_file(
 
 @router.get("/stream-secure")
 def stream_secure_file(
+    request: Request,
     token: str,
     db: Session = Depends(get_db),
 ):
@@ -647,7 +648,6 @@ def stream_secure_file(
             settings.SECRET_KEY,
             algorithms=["HS256"]
         )
-
 
     except Exception:
 
@@ -669,12 +669,9 @@ def stream_secure_file(
         )
 
 
-    # Vérifie utilisateur
     user = (
         db.query(User)
-        .filter(
-            User.id == user_id
-        )
+        .filter(User.id == user_id)
         .first()
     )
 
@@ -687,7 +684,6 @@ def stream_secure_file(
         )
 
 
-    # Vérifie encore les droits premium
     require_upload_access(
         db,
         user,
@@ -702,39 +698,95 @@ def stream_secure_file(
 
 
     content_type = (
-        mimetypes.guess_type(
-            str(path)
-        )[0]
+        mimetypes.guess_type(str(path))[0]
         or "application/octet-stream"
     )
 
 
-    headers = {
+    range_header = request.headers.get("range")
 
-        "Accept-Ranges": "bytes",
 
-        "Content-Length":
-            str(file_size),
+    if range_header:
 
-        "Content-Disposition":
+        range_value = range_header.replace(
+            "bytes=",
+            ""
+        )
+
+        start_str, end_str = range_value.split("-")
+
+
+        start = int(start_str)
+
+        end = (
+            int(end_str)
+            if end_str
+            else file_size - 1
+        )
+
+
+        end = min(
+            end,
+            file_size - 1
+        )
+
+
+        headers = {
+
+            "Content-Range":
+            f"bytes {start}-{end}/{file_size}",
+
+            "Accept-Ranges":
+            "bytes",
+
+            "Content-Length":
+            str(end-start+1),
+
+            "Content-Disposition":
             "inline",
 
+            "Cache-Control":
+            "private",
+
+        }
+
+
+        return StreamingResponse(
+            iter_file_range(
+                path,
+                start,
+                end
+            ),
+            status_code=206,
+            headers=headers,
+            media_type=content_type
+        )
+
+
+    headers = {
+
+        "Accept-Ranges":
+        "bytes",
+
+        "Content-Length":
+        str(file_size),
+
+        "Content-Disposition":
+        "inline",
+
         "Cache-Control":
-            "private, max-age=300",
+        "private",
 
     }
 
 
     return StreamingResponse(
-
         iter_file_range(
             path,
             0,
-            file_size - 1
+            file_size-1
         ),
-
         headers=headers,
-
         media_type=content_type
     )
 
