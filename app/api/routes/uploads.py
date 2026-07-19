@@ -486,6 +486,22 @@ def create_file_access_url(
         f"{settings.BACKEND_URL}/api/v1/uploads/stream-secure?token={token}"
     }
 
+
+@router.get("/public-file")
+def get_public_uploaded_file(
+    file_url: str = Query(...),
+):
+    path = safe_file_path(file_url)
+
+    return FileResponse(
+        path=str(path),
+        media_type=mimetypes.guess_type(str(path))[0]
+        or "application/octet-stream",
+        headers={
+            "Cache-Control": "public, max-age=86400",
+        },
+    )
+
 @router.get("/file")
 def get_uploaded_file(
     file_url: str = Query(...),
@@ -804,4 +820,27 @@ def download_uploaded_file(
         path=str(path),
         filename=path.name,
         media_type="application/octet-stream"
+    )
+
+
+@router.get("/thumbnail/{filename}")
+def get_thumbnail(filename:str):
+
+    path = (
+        BASE_UPLOAD_PATH
+        / "contents"
+        / "thumbnails"
+        / filename
+    )
+
+    if not path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail="Image introuvable"
+        )
+
+
+    return FileResponse(
+        path=str(path),
+        media_type="image/jpeg"
     )
