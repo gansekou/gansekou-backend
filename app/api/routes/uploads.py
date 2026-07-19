@@ -1,6 +1,8 @@
 import uuid
 import mimetypes
 from pathlib import Path
+from fastapi import HTTPException
+
 
 import aiofiles
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, Query
@@ -152,25 +154,61 @@ def delete_local_file(file_url: str):
     path.unlink()
     return True
 
+
 def safe_file_path(file_url: str) -> Path:
+    """
+    Construit un chemin sécurisé à partir d'un chemin relatif
+    stocké en base de données.
+
+    Exemple :
+        contents/files/d9850fef-c0b6-4e33-99a9-2af370c88aad.pdf
+        contents/videos/video.mp4
+        contents/audios/audio.mp3
+    """
+
+    if not file_url:
+        raise HTTPException(
+            status_code=400,
+            detail="Chemin fichier vide"
+        )
+
     try:
-        path = Path(file_url.replace("\\", "/")).resolve()
-    except (OSError, RuntimeError):
+        relative_path = Path(file_url.replace("\\", "/"))
+
+        # Interdit les chemins absolus
+        if relative_path.is_absolute():
+            raise HTTPException(
+                status_code=400,
+                detail="Chemin absolu interdit"
+            )
+
+        path = (BASE_UPLOAD_PATH / relative_path).resolve()
+
+        # Empêche toute sortie du dossier uploads
+        path.relative_to(BASE_UPLOAD_PATH)
+
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail="Accès interdit au fichier"
+        )
+
+    except Exception:
         raise HTTPException(
             status_code=400,
             detail="Chemin fichier invalide"
         )
 
-    if path != BASE_UPLOAD_PATH and BASE_UPLOAD_PATH not in path.parents:
-        raise HTTPException(
-            status_code=400,
-            detail="Chemin fichier invalide"
-        )
-
-    if not path.exists() or not path.is_file():
+    if not path.exists():
         raise HTTPException(
             status_code=404,
             detail="Fichier introuvable"
+        )
+
+    if not path.is_file():
+        raise HTTPException(
+            status_code=400,
+            detail="Le chemin ne correspond pas à un fichier"
         )
 
     return path
