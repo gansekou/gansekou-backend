@@ -113,7 +113,7 @@ async def save_file(
     validate_extension(extension, allowed_extensions)
     validate_mime(file, file_type)
 
-    folder_path = Path(BASE_UPLOAD_DIR) / folder
+    folder_path = BASE_UPLOAD_PATH / folder
     folder_path.mkdir(parents=True, exist_ok=True)
 
     filename = f"{uuid.uuid4()}.{extension}"
@@ -138,14 +138,16 @@ async def save_file(
 
             await out_file.write(chunk)
 
-    return {
-        "file_url": str(file_path).replace("\\", "/"),
-        "filename": filename,
-        "original_filename": file.filename,
-        "extension": extension,
-        "content_type": file.content_type,
-        "size_bytes": size,
-    }
+    relative_path = f"{folder}/{filename}".replace("\\", "/")
+
+return {
+    "file_url": relative_path,
+    "filename": filename,
+    "original_filename": file.filename,
+    "extension": extension,
+    "content_type": file.content_type,
+    "size_bytes": size,
+}
 
 
 def delete_local_file(file_url: str):
@@ -157,31 +159,34 @@ def delete_local_file(file_url: str):
 
 def safe_file_path(file_url: str) -> Path:
     """
-    Construit un chemin sécurisé à partir d'un chemin relatif
-    stocké en base de données.
+    Résout un chemin relatif stocké en base de données
+    vers un fichier situé dans le dossier uploads.
 
-    Exemple :
-        contents/files/d9850fef-c0b6-4e33-99a9-2af370c88aad.pdf
-        contents/videos/video.mp4
-        contents/audios/audio.mp3
+    Exemple de file_url :
+        contents/files/mon-cours.pdf
+        contents/videos/lecon.mp4
+        contents/audios/exercice.mp3
+        profiles/avatar.jpg
+        teacher_answers/reponse.pdf
     """
 
-    if not file_url:
+    if not file_url or not file_url.strip():
         raise HTTPException(
             status_code=400,
             detail="Chemin fichier vide"
         )
 
     try:
-        relative_path = Path(file_url.replace("\\", "/"))
+        relative_path = Path(file_url.replace("\\", "/").strip())
 
-        # Interdit les chemins absolus
+        # Refuse les chemins absolus
         if relative_path.is_absolute():
             raise HTTPException(
                 status_code=400,
                 detail="Chemin absolu interdit"
             )
 
+        # Construit le chemin réel
         path = (BASE_UPLOAD_PATH / relative_path).resolve()
 
         # Empêche toute sortie du dossier uploads
@@ -192,6 +197,9 @@ def safe_file_path(file_url: str) -> Path:
             status_code=400,
             detail="Accès interdit au fichier"
         )
+
+    except HTTPException:
+        raise
 
     except Exception:
         raise HTTPException(
@@ -397,13 +405,27 @@ async def upload_teacher_answer_attachment(
     file: UploadFile = File(...),
     current_user=Depends(require_roles(ANSWER_ATTACHMENT_ROLES)),
 ):
-    result = await save_file(
-        file=file,
-        folder="teacher_answers",
-        allowed_extensions=DOCUMENT_EXTENSIONS | IMAGE_EXTENSIONS | AUDIO_EXTENSIONS,
-        max_size=MAX_DOCUMENT_SIZE,
-        file_type="document" if get_extension(file.filename) in DOCUMENT_EXTENSIONS else "image",
+    extension = get_extension(file.filename)
+
+if extension in DOCUMENT_EXTENSIONS:
+    file_type = "document"
+elif extension in IMAGE_EXTENSIONS:
+    file_type = "image"
+elif extension in AUDIO_EXTENSIONS:
+    file_type = "audio"
+else:
+    raise HTTPException(
+        status_code=400,
+        detail="Type de fichier non supporté"
     )
+
+result = await save_file(
+    file=file,
+    folder="teacher_answers",
+    allowed_extensions=DOCUMENT_EXTENSIONS | IMAGE_EXTENSIONS | AUDIO_EXTENSIONS,
+    max_size=MAX_DOCUMENT_SIZE,
+    file_type=file_type,
+)
 
     return {
         "message": "Pièce jointe de réponse uploadée",
@@ -489,12 +511,15 @@ def stream_uploaded_file(
 
         end = min(end, file_size - 1)
 
-        headers = {
-            "Content-Range": f"bytes {start}-{end}/{file_size}",
-            "Accept-Ranges": "bytes",
-            "Content-Length": str(end - start + 1),
-            "Content-Type": content_type,
-        }
+       headers = {
+    "Content-Range": f"bytes {start}-{end}/{file_size}",
+    "Accept-Ranges": "bytes",
+    "Content-Length": str(end - start + 1),
+    "Content-Type": content_type,
+    "Content-Disposition": "inline",
+    "Cache-Control": "private, max-age=3600",
+    "Access-Control-Expose-Headers": "Content-Length,Content-Range,Accept-Ranges",
+}
 
         return StreamingResponse(
             iter_file_range(path, start, end),
@@ -504,10 +529,13 @@ def stream_uploaded_file(
         )
 
     headers = {
-        "Content-Length": str(file_size),
-        "Accept-Ranges": "bytes",
-        "Content-Type": content_type,
-    }
+    "Content-Length": str(file_size),
+    "Accept-Ranges": "bytes",
+    "Content-Type": content_type,
+    "Content-Disposition": "inline",
+    "Cache-Control": "private, max-age=3600",
+    "Access-Control-Expose-Headers": "Content-Length,Content-Range,Accept-Ranges",
+}
 
     return StreamingResponse(
         iter_file_range(path, 0, file_size - 1),
