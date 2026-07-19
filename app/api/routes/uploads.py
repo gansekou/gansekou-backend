@@ -3,6 +3,10 @@ import mimetypes
 from pathlib import Path
 from fastapi import HTTPException
 
+from jose import jwt
+from datetime import datetime, timedelta
+from secrets import token_urlsafe
+
 
 import aiofiles
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, Query
@@ -444,6 +448,45 @@ async def upload_teacher_answer_attachment(
     }
 
 
+@router.get("/access-url")
+def create_pdf_access_url(
+    file_url: str = Query(...),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+
+    # Vérifie que le fichier existe
+    path = safe_file_path(file_url)
+
+
+    # Vérifie abonnement premium
+    require_upload_access(
+        db,
+        current_user,
+        file_url
+    )
+
+
+    payload = {
+        "file_url": file_url,
+        "user_id": current_user.id,
+        "exp": datetime.utcnow() + timedelta(minutes=15)
+    }
+
+
+    token = jwt.encode(
+        payload,
+        settings.SECRET_KEY,
+        algorithm="HS256"
+    )
+
+
+    return {
+        "url":
+        f"/api/v1/uploads/stream-secure?token={token}"
+    }
+
+
 @router.get("/file")
 def get_uploaded_file(
     file_url: str = Query(...),
@@ -590,6 +633,46 @@ def stream_uploaded_file(
         ),
         headers=headers,
         media_type=content_type,
+    )
+
+@router.get("/stream-secure")
+def stream_secure_file(
+    token:str,
+):
+
+    try:
+
+        payload = jwt.decode(
+            token,
+            settings.SECRET_KEY,
+            algorithms=["HS256"]
+        )
+
+
+    except Exception:
+
+        raise HTTPException(
+            status_code=403,
+            detail="Lien expiré ou invalide"
+        )
+
+
+    file_url = payload["file_url"]
+
+
+    path = safe_file_path(file_url)
+
+
+    file_size = path.stat().st_size
+
+
+    return StreamingResponse(
+        iter_file_range(
+            path,
+            0,
+            file_size-1
+        ),
+        media_type="application/pdf"
     )
 
 
