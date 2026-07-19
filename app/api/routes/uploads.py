@@ -140,21 +140,25 @@ async def save_file(
 
     relative_path = f"{folder}/{filename}".replace("\\", "/")
 
-return {
-    "file_url": relative_path,
-    "filename": filename,
-    "original_filename": file.filename,
-    "extension": extension,
-    "content_type": file.content_type,
-    "size_bytes": size,
-}
+    return {
+        "file_url": relative_path,
+        "filename": filename,
+        "original_filename": file.filename,
+        "extension": extension,
+        "content_type": file.content_type,
+        "size_bytes": size,
+    }
 
 
-def delete_local_file(file_url: str):
+def delete_local_file(file_url:str):
+
     path = safe_file_path(file_url)
 
-    path.unlink()
-    return True
+    if path.exists():
+        path.unlink()
+        return True
+
+    return False
 
 
 def safe_file_path(file_url: str) -> Path:
@@ -178,6 +182,13 @@ def safe_file_path(file_url: str) -> Path:
 
     try:
         relative_path = Path(file_url.replace("\\", "/").strip())
+        parts = relative_path.parts
+
+        if "uploads" in parts:
+            index = parts.index("uploads")
+            relative_path = Path(
+                *parts[index+1:]
+            )
 
         # Refuse les chemins absolus
         if relative_path.is_absolute():
@@ -407,25 +418,25 @@ async def upload_teacher_answer_attachment(
 ):
     extension = get_extension(file.filename)
 
-if extension in DOCUMENT_EXTENSIONS:
-    file_type = "document"
-elif extension in IMAGE_EXTENSIONS:
-    file_type = "image"
-elif extension in AUDIO_EXTENSIONS:
-    file_type = "audio"
-else:
-    raise HTTPException(
-        status_code=400,
-        detail="Type de fichier non supporté"
+    if extension in DOCUMENT_EXTENSIONS:
+        file_type = "document"
+    elif extension in IMAGE_EXTENSIONS:
+        file_type = "image"
+    elif extension in AUDIO_EXTENSIONS:
+        file_type = "audio"
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="Type de fichier non supporté"
+        )
+    
+    result = await save_file(
+        file=file,
+        folder="teacher_answers",
+        allowed_extensions=DOCUMENT_EXTENSIONS | IMAGE_EXTENSIONS | AUDIO_EXTENSIONS,
+        max_size=MAX_DOCUMENT_SIZE,
+        file_type=file_type,
     )
-
-result = await save_file(
-    file=file,
-    folder="teacher_answers",
-    allowed_extensions=DOCUMENT_EXTENSIONS | IMAGE_EXTENSIONS | AUDIO_EXTENSIONS,
-    max_size=MAX_DOCUMENT_SIZE,
-    file_type=file_type,
-)
 
     return {
         "message": "Pièce jointe de réponse uploadée",
@@ -442,7 +453,14 @@ def get_uploaded_file(
     path = safe_file_path(file_url)
     require_upload_access(db, current_user, file_url)
 
-    return FileResponse(str(path))
+    return FileResponse(
+    path=str(path),
+    media_type=mimetypes.guess_type(str(path))[0] or "application/octet-stream",
+    headers={
+        "Content-Disposition": "inline",
+        "Cache-Control": "private, max-age=3600",
+    },
+)
 
 
 @router.delete("/file")
@@ -491,54 +509,85 @@ def stream_uploaded_file(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
+
     path = safe_file_path(file_url)
-    require_upload_access(db, current_user, file_url)
+
+    require_upload_access(
+        db,
+        current_user,
+        file_url
+    )
 
     file_size = path.stat().st_size
-    content_type = mimetypes.guess_type(str(path))[0] or "application/octet-stream"
+
+    content_type = (
+        mimetypes.guess_type(str(path))[0]
+        or "application/octet-stream"
+    )
 
     range_header = request.headers.get("range")
 
+
     if range_header:
+
         range_value = range_header.replace("bytes=", "")
+
         start_str, end_str = range_value.split("-")
 
         start = int(start_str)
-        end = int(end_str) if end_str else file_size - 1
+
+        end = (
+            int(end_str)
+            if end_str
+            else file_size - 1
+        )
+
 
         if start >= file_size:
-            raise HTTPException(status_code=416, detail="Range invalide")
+            raise HTTPException(
+                status_code=416,
+                detail="Range invalide"
+            )
+
 
         end = min(end, file_size - 1)
 
-       headers = {
-    "Content-Range": f"bytes {start}-{end}/{file_size}",
-    "Accept-Ranges": "bytes",
-    "Content-Length": str(end - start + 1),
-    "Content-Type": content_type,
-    "Content-Disposition": "inline",
-    "Cache-Control": "private, max-age=3600",
-    "Access-Control-Expose-Headers": "Content-Length,Content-Range,Accept-Ranges",
-}
+
+        headers = {
+            "Content-Range": f"bytes {start}-{end}/{file_size}",
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(end-start+1),
+            "Content-Disposition": "inline",
+            "Cache-Control": "private",
+        }
+
 
         return StreamingResponse(
-            iter_file_range(path, start, end),
+            iter_file_range(
+                path,
+                start,
+                end
+            ),
             status_code=206,
             headers=headers,
             media_type=content_type,
         )
 
+
     headers = {
-    "Content-Length": str(file_size),
-    "Accept-Ranges": "bytes",
-    "Content-Type": content_type,
-    "Content-Disposition": "inline",
-    "Cache-Control": "private, max-age=3600",
-    "Access-Control-Expose-Headers": "Content-Length,Content-Range,Accept-Ranges",
-}
+        "Content-Length": str(file_size),
+        "Accept-Ranges": "bytes",
+        "Content-Disposition": "inline",
+        "Cache-Control": "private",
+    }
+
 
     return StreamingResponse(
-        iter_file_range(path, 0, file_size - 1),
+        iter_file_range(
+            path,
+            0,
+            file_size-1
+        ),
         headers=headers,
         media_type=content_type,
     )
