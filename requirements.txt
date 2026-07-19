@@ -11,3 +11,5 @@ aiofiles==24.1.0
 firebase-admin==6.6.0
 openai==1.58.1
 httpx==0.28.1
+python-jose[cryptography]
+
