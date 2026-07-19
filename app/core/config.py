@@ -3,11 +3,12 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    APP_NAME: str = "GANSECOU"
+    APP_NAME: str = "GANSEKOU"
     APP_ENV: str = "development"
+    BACKEND_URL: str = "https://api.gansekou.com"
     DATABASE_URL: str
     SECRET_KEY: str = "change-me"
-    CORS_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000"
+    CORS_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000,https://app.gansekou.com"
     UPLOAD_DIR: str = "uploads"
     FIREBASE_CREDENTIALS_PATH: str | None = None
     FIREBASE_CREDENTIALS_JSON: str | None = None
