@@ -5,8 +5,6 @@ from fastapi import HTTPException
 
 from jose import jwt
 from datetime import datetime, timedelta
-from secrets import token_urlsafe
-
 
 import aiofiles
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, Query
@@ -18,6 +16,7 @@ from app.core.config import settings
 from app.core.security import get_current_user, require_roles
 from app.core.premium import require_premium_access
 from app.models.content import Content
+from app.models.user import User
 
 from fastapi import Request
 from fastapi.responses import StreamingResponse
@@ -449,17 +448,17 @@ async def upload_teacher_answer_attachment(
 
 
 @router.get("/access-url")
-def create_pdf_access_url(
+def create_file_access_url(
     file_url: str = Query(...),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
 
     # Vérifie que le fichier existe
-    path = safe_file_path(file_url)
+    safe_file_path(file_url)
 
 
-    # Vérifie abonnement premium
+    # Vérifie les droits premium
     require_upload_access(
         db,
         current_user,
@@ -470,7 +469,8 @@ def create_pdf_access_url(
     payload = {
         "file_url": file_url,
         "user_id": current_user.id,
-        "exp": datetime.utcnow() + timedelta(minutes=15)
+        "created_at": datetime.utcnow().timestamp(),
+        "exp": datetime.utcnow() + timedelta(minutes=15),
     }
 
 
@@ -483,9 +483,8 @@ def create_pdf_access_url(
 
     return {
         "url":
-        f"/api/v1/uploads/stream-secure?token={token}"
+        f"{settings.BACKEND_URL}/api/v1/uploads/stream-secure?token={token}"
     }
-
 
 @router.get("/file")
 def get_uploaded_file(
@@ -637,7 +636,8 @@ def stream_uploaded_file(
 
 @router.get("/stream-secure")
 def stream_secure_file(
-    token:str,
+    token: str,
+    db: Session = Depends(get_db),
 ):
 
     try:
@@ -657,7 +657,42 @@ def stream_secure_file(
         )
 
 
-    file_url = payload["file_url"]
+    file_url = payload.get("file_url")
+    user_id = payload.get("user_id")
+
+
+    if not file_url or not user_id:
+
+        raise HTTPException(
+            status_code=403,
+            detail="Token incomplet"
+        )
+
+
+    # Vérifie utilisateur
+    user = (
+        db.query(User)
+        .filter(
+            User.id == user_id
+        )
+        .first()
+    )
+
+
+    if not user:
+
+        raise HTTPException(
+            status_code=403,
+            detail="Utilisateur inexistant"
+        )
+
+
+    # Vérifie encore les droits premium
+    require_upload_access(
+        db,
+        user,
+        file_url
+    )
 
 
     path = safe_file_path(file_url)
@@ -666,13 +701,41 @@ def stream_secure_file(
     file_size = path.stat().st_size
 
 
+    content_type = (
+        mimetypes.guess_type(
+            str(path)
+        )[0]
+        or "application/octet-stream"
+    )
+
+
+    headers = {
+
+        "Accept-Ranges": "bytes",
+
+        "Content-Length":
+            str(file_size),
+
+        "Content-Disposition":
+            "inline",
+
+        "Cache-Control":
+            "private, max-age=300",
+
+    }
+
+
     return StreamingResponse(
+
         iter_file_range(
             path,
             0,
-            file_size-1
+            file_size - 1
         ),
-        media_type="application/pdf"
+
+        headers=headers,
+
+        media_type=content_type
     )
 
 
