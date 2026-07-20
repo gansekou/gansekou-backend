@@ -60,10 +60,7 @@ DEFAULT_MAX_TOKENS = 500
 def ask_ai(
     question: str,
     *,
-    subject_name: str | None = None,
-    level_name: str | None = None,
     language: str = "FR",
-    mode: str = "EXPLAIN",
 ) -> str:
 
     # =========================
@@ -96,15 +93,21 @@ def ask_ai(
         # AI REQUEST
         # =========================
 
-        context = (
-            f"Langue: {language}\n"
-            f"Niveau: {level_name or 'non précisé'}\n"
-            f"Matière: {subject_name or 'non précisée'}\n"
-            f"Mode pédagogique: {mode}\n\n"
-            f"Question: {question}\n\n"
-            "Réponds étape par étape, propose un exercice d'entraînement, "
-            "une recommandation de contenu ou quiz, puis indique la notion à revoir si nécessaire."
-        )
+        context = f"""
+        Langue : {language}
+        
+        Question :
+        
+        {question}
+        
+        Consignes :
+        
+        - Réponds clairement.
+        - Détecte automatiquement la matière concernée.
+        - Adapte automatiquement ton niveau d'explication.
+        - Explique étape par étape lorsque c'est nécessaire.
+        - Donne un exemple si cela aide à comprendre.
+        """
 
         response = client.chat.completions.create(
             model=settings.OPENAI_MODEL,
