@@ -37,10 +37,7 @@ DAILY_AI_LIMIT_ADMIN = 200
 
 class AIChatRequest(BaseModel):
     question: str
-    subject_id: uuid.UUID | None = None
-    level_id: uuid.UUID | None = None
     language: str = "FR"
-    mode: str = "STUDENT_HELP"
 
 
 class AIChatResponse(BaseModel):
