@@ -91,6 +91,7 @@ class ChatConversation(Base):
         back_populates="conversation",
         cascade="all, delete-orphan",
         order_by="ChatMessage.created_at",
+        lazy="selectin",
     )
 
 
