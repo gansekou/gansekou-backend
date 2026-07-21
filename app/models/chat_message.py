@@ -8,6 +8,7 @@ from sqlalchemy import (
     JSON,
     Integer,
 )
+
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 from sqlalchemy.dialects.postgresql import UUID
@@ -30,7 +31,7 @@ class ChatMessage(Base):
         UUID(as_uuid=True),
         ForeignKey(
             "chat_conversations.id",
-            ondelete="CASCADE"
+            ondelete="CASCADE",
         ),
         nullable=False,
         index=True,
@@ -70,18 +71,21 @@ class ChatMessage(Base):
     prompt_tokens: Mapped[int] = mapped_column(
         Integer,
         default=0,
+        nullable=False,
     )
 
 
     completion_tokens: Mapped[int] = mapped_column(
         Integer,
         default=0,
+        nullable=False,
     )
 
 
     created_at: Mapped[DateTime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
+        nullable=False,
     )
 
 
