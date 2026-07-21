@@ -14,6 +14,7 @@ from app.api.routes import study_planner
 from app.api.routes import content_progress
 from app.api.routes import payments
 from app.api.routes import statistics
+from app.api.routes import chat
 
 from app.api.routes import auth, users, schools, education, contents, questions, notifications, sync
 
@@ -101,3 +102,11 @@ api_router.include_router(
     prefix="/statistics",
     tags=["Statistics"]
 )
+
+api_router.include_router(
+    chat.router,
+    prefix="/chat",
+    tags=["Chat"]
+)
+
+
