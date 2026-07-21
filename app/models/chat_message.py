@@ -1,79 +1,89 @@
 import uuid
 
 from sqlalchemy import (
-    Column,
     String,
     DateTime,
     ForeignKey,
     Text,
     JSON,
     Integer,
-    func,
 )
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.sql import func
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import relationship
 
-from app.database.session import Base
+from app.database.base import Base
 
 
 class ChatMessage(Base):
     __tablename__ = "chat_messages"
 
-    id = Column(
+
+    id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         primary_key=True,
         default=uuid.uuid4,
     )
 
-    conversation_id = Column(
+
+    conversation_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey(
             "chat_conversations.id",
-            ondelete="CASCADE",
+            ondelete="CASCADE"
         ),
         nullable=False,
         index=True,
     )
 
-    role = Column(
+
+    role: Mapped[str] = mapped_column(
         String(20),
         nullable=False,
     )
 
-    content = Column(
+
+    content: Mapped[str] = mapped_column(
         Text,
         nullable=False,
     )
 
-    image_url = Column(
+
+    image_url: Mapped[str | None] = mapped_column(
         Text,
         nullable=True,
     )
 
-    sources = Column(
+
+    sources: Mapped[dict | None] = mapped_column(
         JSON,
         nullable=True,
     )
 
-    model = Column(
+
+    model: Mapped[str | None] = mapped_column(
         String(100),
         nullable=True,
     )
 
-    prompt_tokens = Column(
+
+    prompt_tokens: Mapped[int] = mapped_column(
         Integer,
         default=0,
     )
 
-    completion_tokens = Column(
+
+    completion_tokens: Mapped[int] = mapped_column(
         Integer,
         default=0,
     )
 
-    created_at = Column(
+
+    created_at: Mapped[DateTime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
     )
+
 
     conversation = relationship(
         "ChatConversation",
