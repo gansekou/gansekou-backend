@@ -46,7 +46,7 @@ Règles importantes :
 # CONFIGURATION IA
 # =========================
 
-MAX_QUESTION_LENGTH = 1500
+MAX_PROMPT_LENGTH = 12000
 
 DEFAULT_TEMPERATURE = 0.2
 
@@ -81,10 +81,10 @@ def ask_ai(
             detail="Question trop courte.",
         )
 
-    if len(question) > MAX_QUESTION_LENGTH:
+    if len(question) > MAX_PROMPT_LENGTH:
         raise HTTPException(
             status_code=400,
-            detail="Question trop longue.",
+            detail="Contexte conversation trop important.",
         )
 
     try:
