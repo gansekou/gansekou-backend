@@ -18,6 +18,10 @@ MAX_HISTORY_MESSAGES = 20
 
 
 
+# =====================================================
+# CREATION CONVERSATION
+# =====================================================
+
 def create_conversation(
     db: Session,
     user_id: uuid.UUID,
@@ -32,9 +36,11 @@ def create_conversation(
         last_message_at=datetime.now(timezone.utc),
     )
 
+
     db.add(conversation)
 
     db.commit()
+
     db.refresh(conversation)
 
     return conversation
@@ -43,6 +49,10 @@ def create_conversation(
 
 
 
+# =====================================================
+# ENVOI MESSAGE CHAT
+# =====================================================
+
 def send_message(
     db: Session,
     conversation: ChatConversation,
@@ -50,6 +60,7 @@ def send_message(
 ):
 
     if not message or len(message.strip()) < 2:
+
         raise HTTPException(
             status_code=400,
             detail="Message vide ou trop court."
@@ -58,9 +69,10 @@ def send_message(
 
     try:
 
-        # =========================
+
+        # =================================================
         # 1 - MESSAGE ELEVE
-        # =========================
+        # =================================================
 
         user_message = ChatMessage(
             conversation_id=conversation.id,
@@ -68,15 +80,16 @@ def send_message(
             content=message.strip(),
         )
 
+
         db.add(user_message)
 
-        db.commit()
+        db.flush()
 
 
 
-        # =========================
-        # 2 - HISTORIQUE CHAT
-        # =========================
+        # =================================================
+        # 2 - RECUPERATION HISTORIQUE
+        # =================================================
 
         history = (
             db.query(ChatMessage)
@@ -94,6 +107,7 @@ def send_message(
         history.reverse()
 
 
+
         conversation_context = "\n\n".join(
             [
                 f"{msg.role}: {msg.content}"
@@ -103,17 +117,19 @@ def send_message(
 
 
 
-        # =========================
+
+        # =================================================
         # 3 - PROMPT KOUMA IA
-        # =========================
+        # =================================================
 
         prompt = f"""
 
 Tu es Kouma IA, assistant pédagogique premium de GANSEKOU.
 
-Ton rôle est d'accompagner les élèves camerounais dans leurs apprentissages.
+Tu accompagnes les élèves camerounais dans leurs apprentissages.
 
-Tu peux aider dans :
+Tes domaines :
+
 - Mathématiques
 - Sciences
 - Langues
@@ -122,11 +138,16 @@ Tu peux aider dans :
 - Orientation scolaire
 - Préparation aux examens
 
-Adapte tes explications au niveau scolaire de l'élève.
+Consignes :
 
-Explique avec pédagogie, exemples simples et étapes détaillées.
+- Adapte toujours ton niveau d'explication à l'élève.
+- Explique progressivement.
+- Donne des exemples simples.
+- Encourage l'élève.
+- Ne donne pas uniquement la réponse, explique le raisonnement.
 
-Historique de conversation :
+
+Historique :
 
 {conversation_context}
 
@@ -137,9 +158,10 @@ Réponds au dernier message de l'élève.
 
 
 
-        # =========================
-        # 4 - GENERATION IA
-        # =========================
+
+        # =================================================
+        # 4 - APPEL IA
+        # =================================================
 
         answer = ask_ai(
             prompt,
@@ -148,9 +170,10 @@ Réponds au dernier message de l'élève.
 
 
 
-        # =========================
+
+        # =================================================
         # 5 - REPONSE IA
-        # =========================
+        # =================================================
 
         ai_message = ChatMessage(
             conversation_id=conversation.id,
@@ -162,16 +185,19 @@ Réponds au dernier message de l'élève.
 
         db.add(ai_message)
 
+        db.flush()
 
 
-        # =========================
-        # 6 - UPDATE CONVERSATION
-        # =========================
+
+        # =================================================
+        # 6 - MISE A JOUR CONVERSATION
+        # =================================================
 
         conversation.last_message_at = datetime.now(timezone.utc)
 
 
         db.commit()
+
 
         db.refresh(ai_message)
 
@@ -184,7 +210,35 @@ Réponds au dernier message de l'élève.
 
         db.rollback()
 
+
         raise HTTPException(
             status_code=500,
             detail=f"Erreur chat IA : {str(e)}"
         )
+
+
+
+
+
+# =====================================================
+# HISTORIQUE CONVERSATION
+# =====================================================
+
+def get_conversation_messages(
+    db: Session,
+    conversation_id: uuid.UUID,
+):
+
+    messages = (
+        db.query(ChatMessage)
+        .filter(
+            ChatMessage.conversation_id == conversation_id
+        )
+        .order_by(
+            ChatMessage.created_at.asc()
+        )
+        .all()
+    )
+
+
+    return messages
