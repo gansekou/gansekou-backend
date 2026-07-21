@@ -4,10 +4,13 @@ from sqlalchemy import String, DateTime, Boolean, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 from sqlalchemy.dialects.postgresql import UUID
+from datetime import datetime, timezone
 
 from app.database.base import Base
 
-
+def touch_last_message(self):
+    self.last_message_at = datetime.now(timezone.utc)
+    
 class ChatConversation(Base):
     __tablename__ = "chat_conversations"
 
@@ -65,6 +68,7 @@ class ChatConversation(Base):
     last_message_at: Mapped[DateTime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
+        nullable=False,
     )
 
 
