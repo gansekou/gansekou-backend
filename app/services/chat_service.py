@@ -1,5 +1,7 @@
 import uuid
 
+from datetime import datetime, timezone
+
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
 
@@ -27,9 +29,11 @@ def create_conversation(
         user_id=user_id,
         title=title,
         language=language,
+        last_message_at=datetime.now(timezone.utc),
     )
 
     db.add(conversation)
+
     db.commit()
     db.refresh(conversation)
 
@@ -55,7 +59,7 @@ def send_message(
     try:
 
         # =========================
-        # 1 - SAUVEGARDE MESSAGE ELEVE
+        # 1 - MESSAGE ELEVE
         # =========================
 
         user_message = ChatMessage(
@@ -65,12 +69,13 @@ def send_message(
         )
 
         db.add(user_message)
+
         db.commit()
 
 
 
         # =========================
-        # 2 - RECUPERATION HISTORIQUE
+        # 2 - HISTORIQUE CHAT
         # =========================
 
         history = (
@@ -89,7 +94,6 @@ def send_message(
         history.reverse()
 
 
-
         conversation_context = "\n\n".join(
             [
                 f"{msg.role}: {msg.content}"
@@ -100,42 +104,41 @@ def send_message(
 
 
         # =========================
-        # 3 - PROMPT CHAT LIBRE
+        # 3 - PROMPT KOUMA IA
         # =========================
 
         prompt = f"""
 
 Tu es Kouma IA, assistant pédagogique premium de GANSEKOU.
 
-Tu discutes librement avec un élève.
+Ton rôle est d'accompagner les élèves camerounais dans leurs apprentissages.
 
-Tu n'es pas limité à une matière précise.
+Tu peux aider dans :
+- Mathématiques
+- Sciences
+- Langues
+- Histoire-Géographie
+- Méthodes de travail
+- Orientation scolaire
+- Préparation aux examens
 
-Tu peux aider sur :
-- mathématiques
-- sciences
-- langues
-- histoire
-- orientation scolaire
-- méthodologie
-- révisions
-- compréhension des cours
+Adapte tes explications au niveau scolaire de l'élève.
 
-Adapte toujours ton langage au niveau de l'élève.
+Explique avec pédagogie, exemples simples et étapes détaillées.
 
-Historique de discussion :
+Historique de conversation :
 
 {conversation_context}
 
 
-Réponds naturellement au dernier message.
+Réponds au dernier message de l'élève.
 
 """
 
 
 
         # =========================
-        # 4 - APPEL IA
+        # 4 - GENERATION IA
         # =========================
 
         answer = ask_ai(
@@ -146,7 +149,7 @@ Réponds naturellement au dernier message.
 
 
         # =========================
-        # 5 - SAUVEGARDE REPONSE IA
+        # 5 - REPONSE IA
         # =========================
 
         ai_message = ChatMessage(
@@ -165,10 +168,11 @@ Réponds naturellement au dernier message.
         # 6 - UPDATE CONVERSATION
         # =========================
 
-        conversation.last_message_at = ai_message.created_at
+        conversation.last_message_at = datetime.now(timezone.utc)
 
 
         db.commit()
+
         db.refresh(ai_message)
 
 
