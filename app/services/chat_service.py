@@ -1,20 +1,33 @@
 import uuid
+import logging
 
 from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
-from sqlalchemy import desc
 
 from fastapi import HTTPException
+
 
 from app.models.chat_conversation import ChatConversation
 from app.models.chat_message import ChatMessage
 
+
 from app.services.ai_service import ask_ai
+from app.services.chat_memory import build_memory_context
+
+
 from app.core.config import settings
 
 
-MAX_HISTORY_MESSAGES = 20
+
+logger = logging.getLogger(__name__)
+
+
+
+
+MAX_USER_MESSAGE_LENGTH = 10000
+
+
 
 
 
@@ -22,18 +35,27 @@ MAX_HISTORY_MESSAGES = 20
 # CREATION CONVERSATION
 # =====================================================
 
+
 def create_conversation(
     db: Session,
     user_id: uuid.UUID,
-    language: str = "FR",
-    title: str = "Nouvelle discussion",
+    language="FR",
+    title="Nouvelle discussion"
 ):
 
+
     conversation = ChatConversation(
+
         user_id=user_id,
-        title=title,
+
         language=language,
-        last_message_at=datetime.now(timezone.utc),
+
+        title=title,
+
+        last_message_at=datetime.now(
+            timezone.utc
+        )
+
     )
 
 
@@ -43,6 +65,7 @@ def create_conversation(
 
     db.refresh(conversation)
 
+
     return conversation
 
 
@@ -50,34 +73,51 @@ def create_conversation(
 
 
 # =====================================================
-# ENVOI MESSAGE CHAT
+# ENVOI MESSAGE
 # =====================================================
+
 
 def send_message(
     db: Session,
     conversation: ChatConversation,
-    message: str,
+    message: str
 ):
 
-    if not message or len(message.strip()) < 2:
+
+    if not message or not message.strip():
 
         raise HTTPException(
-            status_code=400,
-            detail="Message vide ou trop court."
+            400,
+            "Message vide"
         )
+
+
+
+    if len(message) > MAX_USER_MESSAGE_LENGTH:
+
+        raise HTTPException(
+            400,
+            "Votre message est trop volumineux."
+        )
+
 
 
     try:
 
 
-        # =================================================
-        # 1 - MESSAGE ELEVE
-        # =================================================
+        # -----------------------------
+        # MESSAGE UTILISATEUR
+        # -----------------------------
+
 
         user_message = ChatMessage(
+
             conversation_id=conversation.id,
+
             role="USER",
-            content=message.strip(),
+
+            content=message.strip()
+
         )
 
 
@@ -87,113 +127,112 @@ def send_message(
 
 
 
-        # =================================================
-        # 2 - RECUPERATION HISTORIQUE
-        # =================================================
-
-        history = (
-            db.query(ChatMessage)
-            .filter(
-                ChatMessage.conversation_id == conversation.id
-            )
-            .order_by(
-                desc(ChatMessage.created_at)
-            )
-            .limit(MAX_HISTORY_MESSAGES)
-            .all()
-        )
+        # -----------------------------
+        # MEMOIRE INTELLIGENTE
+        # -----------------------------
 
 
-        history.reverse()
+        memory = build_memory_context(
 
+            db,
 
+            conversation.id
 
-        conversation_context = "\n\n".join(
-            [
-                f"{msg.role}: {msg.content}"
-                for msg in history
-            ]
         )
 
 
 
 
-        # =================================================
-        # 3 - PROMPT KOUMA IA
-        # =================================================
+        # -----------------------------
+        # PROMPT KOUMA
+        # -----------------------------
+
 
         prompt = f"""
 
-Tu es Kouma IA, assistant pédagogique premium de GANSEKOU.
+Tu es Kouma IA,
+assistant pédagogique officiel de GANSEKOU.
 
-Tu accompagnes les élèves camerounais dans leurs apprentissages.
 
-Tes domaines :
+Tu aides les élèves camerounais.
 
-- Mathématiques
-- Sciences
-- Langues
-- Histoire-Géographie
-- Méthodes de travail
-- Orientation scolaire
-- Préparation aux examens
 
-Consignes :
+Règles :
 
-- Adapte toujours ton niveau d'explication à l'élève.
-- Explique progressivement.
-- Donne des exemples simples.
+- Explique simplement.
+- Adapte au niveau scolaire.
+- Montre les étapes.
 - Encourage l'élève.
-- Ne donne pas uniquement la réponse, explique le raisonnement.
+- Ne donne jamais uniquement la réponse.
 
 
-Historique :
+Historique de la discussion :
 
-{conversation_context}
+{memory}
 
 
-Réponds au dernier message de l'élève.
 
+Question actuelle :
+
+{message}
+
+
+
+Réponds maintenant.
 """
 
 
 
+        # -----------------------------
+        # APPEL IA
+        # -----------------------------
 
-        # =================================================
-        # 4 - APPEL IA
-        # =================================================
 
         answer = ask_ai(
+
             prompt,
-            language=conversation.language,
+
+            language=conversation.language
+
         )
 
 
 
+        if not answer:
 
-        # =================================================
-        # 5 - REPONSE IA
-        # =================================================
+            raise Exception(
+                "Réponse IA vide"
+            )
+
+
+
+
+        # -----------------------------
+        # REPONSE IA
+        # -----------------------------
+
 
         ai_message = ChatMessage(
+
             conversation_id=conversation.id,
+
             role="ASSISTANT",
+
             content=answer,
-            model=settings.OPENAI_MODEL,
+
+            model=settings.OPENAI_MODEL
+
         )
 
 
         db.add(ai_message)
 
-        db.flush()
 
 
+        conversation.last_message_at = datetime.now(
+            timezone.utc
+        )
 
-        # =================================================
-        # 6 - MISE A JOUR CONVERSATION
-        # =================================================
-
-        conversation.last_message_at = datetime.now(timezone.utc)
 
 
         db.commit()
@@ -202,43 +241,73 @@ Réponds au dernier message de l'élève.
         db.refresh(ai_message)
 
 
+
         return ai_message
+
+
+
+
+    except HTTPException:
+
+        raise
+
 
 
 
     except Exception as e:
 
+
         db.rollback()
 
 
+        logger.exception(
+            "Erreur chat conversation=%s",
+            conversation.id
+        )
+
+
         raise HTTPException(
+
             status_code=500,
-            detail=f"Erreur chat IA : {str(e)}"
+
+            detail=(
+                "Kouma IA rencontre "
+                "un problème temporaire."
+            )
+
         )
 
 
 
 
 
+
+
 # =====================================================
-# HISTORIQUE CONVERSATION
+# HISTORIQUE UTILISATEUR
 # =====================================================
+
 
 def get_conversation_messages(
     db: Session,
-    conversation_id: uuid.UUID,
+    conversation_id
 ):
 
-    messages = (
+
+    return (
+
         db.query(ChatMessage)
+
         .filter(
-            ChatMessage.conversation_id == conversation_id
+            ChatMessage.conversation_id
+            ==
+            conversation_id
         )
+
         .order_by(
             ChatMessage.created_at.asc()
         )
+
         .all()
+
     )
-
-
-    return messages
