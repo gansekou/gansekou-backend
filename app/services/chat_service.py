@@ -187,6 +187,11 @@ Réponds maintenant.
         # APPEL IA
         # -----------------------------
 
+        logger.info(
+            "Taille prompt Kouma IA : %s caractères",
+            len(prompt)
+        )
+
 
         answer = ask_ai(
 
