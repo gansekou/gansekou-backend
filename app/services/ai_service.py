@@ -70,7 +70,7 @@ def ask_ai(
     if not question:
         raise HTTPException(
             status_code=400,
-            detail="La question est obligatoire.",
+            detail="Message obligatoire.",
         )
 
     question = question.strip()
