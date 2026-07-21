@@ -9,62 +9,42 @@ from app.models.chat_message import ChatMessage
 logger = logging.getLogger(__name__)
 
 
-# Nombre de messages récents envoyés directement à l'IA
-RECENT_MESSAGES_LIMIT = 12
+RECENT_MESSAGES_LIMIT = 6
 
+MAX_CONTEXT_CHARS = 8000
 
-# Taille maximale du contexte IA
-MAX_CONTEXT_CHARS = 12000
-
-
-# Taille max d'un message individuel
-MAX_MESSAGE_CHARS = 2000
+MAX_MESSAGE_CHARS = 1200
 
 
 
-def clean_text(
-    text: str,
-    max_chars: int = MAX_MESSAGE_CHARS
-):
-    """
-    Nettoyage et réduction des messages
-    """
+def clean_message(text: str):
 
     if not text:
         return ""
 
     text = text.strip()
 
-    if len(text) <= max_chars:
+    if len(text) <= MAX_MESSAGE_CHARS:
         return text
 
-
-    return (
-        text[:max_chars]
-        +
-        "\n...[suite ignorée pour la mémoire IA]"
-    )
+    return text[:MAX_MESSAGE_CHARS] + "\n...[tronqué]"
 
 
 
 
 
-def get_recent_messages(
+def build_memory_context(
     db: Session,
-    conversation_id,
+    conversation_id
 ):
-    """
-    Récupère les derniers messages
-    """
+
 
     messages = (
 
         db.query(ChatMessage)
 
         .filter(
-            ChatMessage.conversation_id
-            ==
-            conversation_id
+            ChatMessage.conversation_id == conversation_id
         )
 
         .order_by(
@@ -82,25 +62,6 @@ def get_recent_messages(
 
     messages.reverse()
 
-    return messages
-
-
-
-
-
-
-def build_memory_context(
-    db: Session,
-    conversation_id,
-):
-    """
-    Construit la mémoire envoyée à Kouma IA
-    """
-
-    messages = get_recent_messages(
-        db,
-        conversation_id
-    )
 
 
     context = ""
@@ -111,25 +72,17 @@ def build_memory_context(
     for msg in messages:
 
 
-        content = clean_text(
+        content = clean_message(
             msg.content
         )
 
 
         block = (
-
-            f"{msg.role}: "
-            f"{content}\n\n"
-
+            f"{msg.role}: {content}\n\n"
         )
 
 
-        if (
-            total + len(block)
-            >
-            MAX_CONTEXT_CHARS
-        ):
-
+        if total + len(block) > MAX_CONTEXT_CHARS:
             break
 
 
@@ -138,39 +91,5 @@ def build_memory_context(
         total += len(block)
 
 
+
     return context
-
-
-
-
-
-
-def summarize_old_memory(
-    messages
-):
-    """
-    Préparation future :
-    résumé intelligent des anciens messages.
-
-    Ici on garde la structure
-    pour brancher une IA de résumé plus tard.
-    """
-
-    if not messages:
-        return ""
-
-
-    summary = []
-
-
-    for msg in messages:
-
-        summary.append(
-            clean_text(
-                msg.content,
-                500
-            )
-        )
-
-
-    return "\n".join(summary)
