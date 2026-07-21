@@ -1,11 +1,19 @@
 import uuid
 
 from sqlalchemy.orm import Session
+from sqlalchemy import desc
+
+from fastapi import HTTPException
 
 from app.models.chat_conversation import ChatConversation
 from app.models.chat_message import ChatMessage
+
 from app.services.ai_service import ask_ai
 from app.core.config import settings
+
+
+MAX_HISTORY_MESSAGES = 20
+
 
 
 def create_conversation(
@@ -29,70 +37,150 @@ def create_conversation(
 
 
 
+
+
 def send_message(
     db: Session,
     conversation: ChatConversation,
     message: str,
 ):
 
-    # Message utilisateur
-
-    user_message = ChatMessage(
-        conversation_id=conversation.id,
-        role="USER",
-        content=message,
-    )
-
-    db.add(user_message)
-    db.commit()
-
-
-    # Historique conversation
-
-    history = (
-        db.query(ChatMessage)
-        .filter(
-            ChatMessage.conversation_id == conversation.id
+    if not message or len(message.strip()) < 2:
+        raise HTTPException(
+            status_code=400,
+            detail="Message vide ou trop court."
         )
-        .order_by(ChatMessage.created_at.asc())
-        .all()
-    )
 
 
-    context = "\n\n".join(
-        [
-            f"{msg.role}: {msg.content}"
-            for msg in history
-        ]
-    )
+    try:
+
+        # =========================
+        # 1 - SAUVEGARDE MESSAGE ELEVE
+        # =========================
+
+        user_message = ChatMessage(
+            conversation_id=conversation.id,
+            role="USER",
+            content=message.strip(),
+        )
+
+        db.add(user_message)
+        db.commit()
 
 
-    prompt = f"""
-Voici l'historique de discussion :
 
-{context}
+        # =========================
+        # 2 - RECUPERATION HISTORIQUE
+        # =========================
+
+        history = (
+            db.query(ChatMessage)
+            .filter(
+                ChatMessage.conversation_id == conversation.id
+            )
+            .order_by(
+                desc(ChatMessage.created_at)
+            )
+            .limit(MAX_HISTORY_MESSAGES)
+            .all()
+        )
 
 
-Réponds au dernier message de l'élève.
+        history.reverse()
+
+
+
+        conversation_context = "\n\n".join(
+            [
+                f"{msg.role}: {msg.content}"
+                for msg in history
+            ]
+        )
+
+
+
+        # =========================
+        # 3 - PROMPT CHAT LIBRE
+        # =========================
+
+        prompt = f"""
+
+Tu es Kouma IA, assistant pédagogique premium de GANSEKOU.
+
+Tu discutes librement avec un élève.
+
+Tu n'es pas limité à une matière précise.
+
+Tu peux aider sur :
+- mathématiques
+- sciences
+- langues
+- histoire
+- orientation scolaire
+- méthodologie
+- révisions
+- compréhension des cours
+
+Adapte toujours ton langage au niveau de l'élève.
+
+Historique de discussion :
+
+{conversation_context}
+
+
+Réponds naturellement au dernier message.
+
 """
 
-    answer = ask_ai(
-        prompt,
-        language=conversation.language,
-    )
 
 
-    # Réponse IA
+        # =========================
+        # 4 - APPEL IA
+        # =========================
 
-    ai_message = ChatMessage(
-        conversation_id=conversation.id,
-        role="ASSISTANT",
-        content=answer,
-        model=settings.OPENAI_MODEL,
-    )
+        answer = ask_ai(
+            prompt,
+            language=conversation.language,
+        )
 
-    db.add(ai_message)
 
-    db.commit()
 
-    return ai_message
+        # =========================
+        # 5 - SAUVEGARDE REPONSE IA
+        # =========================
+
+        ai_message = ChatMessage(
+            conversation_id=conversation.id,
+            role="ASSISTANT",
+            content=answer,
+            model=settings.OPENAI_MODEL,
+        )
+
+
+        db.add(ai_message)
+
+
+
+        # =========================
+        # 6 - UPDATE CONVERSATION
+        # =========================
+
+        conversation.last_message_at = ai_message.created_at
+
+
+        db.commit()
+        db.refresh(ai_message)
+
+
+        return ai_message
+
+
+
+    except Exception as e:
+
+        db.rollback()
+
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erreur chat IA : {str(e)}"
+        )
