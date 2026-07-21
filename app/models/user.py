@@ -49,6 +49,12 @@ class User(Base):
         cascade="all, delete-orphan"
     )
 
+    chat_conversations = relationship(
+        "ChatConversation",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+
     __table_args__ = (
         CheckConstraint("email IS NOT NULL OR phone IS NOT NULL", name="check_email_or_phone_required"),
     )
