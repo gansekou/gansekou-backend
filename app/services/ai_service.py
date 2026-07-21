@@ -78,7 +78,7 @@ def ask_ai(
     if len(question) < 3:
         raise HTTPException(
             status_code=400,
-            detail="Question trop courte.",
+            detail="Message trop court.",
         )
 
     if len(question) > MAX_PROMPT_LENGTH:
