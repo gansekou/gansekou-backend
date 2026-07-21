@@ -64,3 +64,50 @@ def chat_message(
     return {
         "answer": message.content
     }
+
+
+@router.get(
+    "/{conversation_id}",
+    tags=["Chat"]
+)
+def get_chat_history(
+    conversation_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user),
+):
+
+    conversation = (
+        db.query(ChatConversation)
+        .filter(
+            ChatConversation.id == conversation_id,
+            ChatConversation.user_id == current_user.id
+        )
+        .first()
+    )
+
+
+    if not conversation:
+        raise HTTPException(
+            status_code=404,
+            detail="Conversation introuvable."
+        )
+
+
+    messages = get_conversation_messages(
+        db,
+        conversation_id
+    )
+
+
+    return [
+        {
+            "id": str(message.id),
+            "role": message.role,
+            "content": message.content,
+            "image_url": message.image_url,
+            "sources": message.sources,
+            "model": message.model,
+            "created_at": message.created_at,
+        }
+        for message in messages
+    ]
