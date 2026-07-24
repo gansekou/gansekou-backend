@@ -221,6 +221,13 @@ def safe_file_path(file_url: str) -> Path:
             detail="Chemin fichier invalide"
         )
 
+    print("=" * 80)
+    print("BASE_UPLOAD_PATH :", BASE_UPLOAD_PATH)
+    print("FILE_URL         :", file_url)
+    print("RESOLVED PATH    :", path)
+    print("PATH EXISTS      :", path.exists())
+    print("=" * 80)
+    
     if not path.exists():
         raise HTTPException(
             status_code=404,
