@@ -110,6 +110,14 @@ def register_email(payload: EmailRegisterRequest, db: Session = Depends(get_db))
     if existing_email:
         raise HTTPException(status_code=400, detail="Cet email est déjà utilisé")
 
+    if payload.phone:
+        existing_phone = user.get_by_phone(db, payload.phone)
+        if existing_phone:
+            raise HTTPException(
+                status_code=400,
+                detail="Ce numéro de téléphone est déjà utilisé"
+            )
+
     new_user_data = UserCreate(
         firebase_uid=payload.firebase_uid,
         nom=payload.nom,
