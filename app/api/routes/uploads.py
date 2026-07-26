@@ -1,107 +1,278 @@
-import uuid
 import mimetypes
 from pathlib import Path
-from fastapi import HTTPException
+
+from fastapi import (
+    APIRouter,
+    Depends,
+    UploadFile,
+    File,
+    HTTPException,
+    Query,
+    Request,
+)
+
+from fastapi.responses import (
+    StreamingResponse,
+)
+
+from sqlalchemy.orm import Session
 
 from jose import jwt
 from datetime import datetime, timedelta
 
-import aiofiles
-from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, Query
-from fastapi.responses import FileResponse
-from sqlalchemy.orm import Session
 
 from app.database.session import get_db
+
 from app.core.config import settings
-from app.core.security import get_current_user, require_roles
-from app.core.premium import require_premium_access
+from app.core.security import (
+    get_current_user,
+    require_roles,
+)
+
+from app.core.premium import (
+    require_premium_access
+)
+
 from app.models.content import Content
 from app.models.user import User
 
-from fastapi import Request
-from fastapi.responses import StreamingResponse
+from app.services.r2_storage import (
+    r2_storage
+)
+
 
 router = APIRouter()
 
-BASE_UPLOAD_DIR = settings.UPLOAD_DIR
-BASE_UPLOAD_PATH = Path(BASE_UPLOAD_DIR).resolve()
 
-CONTENT_ROLES = ["ADMIN", "PROMOTEUR", "ADMINISTRATEUR", "ENSEIGNANT", "ENSEIGNANT_EN_ATTENTE"]
-ANSWER_ATTACHMENT_ROLES = ["ADMIN", "PROMOTEUR", "ADMINISTRATEUR", "ENSEIGNANT"]
 
-MAX_IMAGE_SIZE = 5 * 1024 * 1024        # 5 MB
-MAX_PDF_SIZE = 25 * 1024 * 1024         # 25 MB
-MAX_AUDIO_SIZE = 50 * 1024 * 1024       # 50 MB
-MAX_VIDEO_SIZE = 200 * 1024 * 1024      # 200 MB
-MAX_DOCUMENT_SIZE = 30 * 1024 * 1024    # 30 MB
+# ======================================================
+# ROLES
+# ======================================================
 
-IMAGE_EXTENSIONS = {"jpg", "jpeg", "png", "webp"}
-PDF_EXTENSIONS = {"pdf"}
-AUDIO_EXTENSIONS = {"mp3", "wav", "m4a", "aac", "ogg"}
-VIDEO_EXTENSIONS = {"mp4", "mov", "webm", "mkv"}
-DOCUMENT_EXTENSIONS = {"pdf", "doc", "docx", "ppt", "pptx", "xls", "xlsx"}
+
+CONTENT_ROLES = [
+    "ADMIN",
+    "PROMOTEUR",
+    "ADMINISTRATEUR",
+    "ENSEIGNANT",
+    "ENSEIGNANT_EN_ATTENTE",
+]
+
+
+ANSWER_ATTACHMENT_ROLES = [
+    "ADMIN",
+    "PROMOTEUR",
+    "ADMINISTRATEUR",
+    "ENSEIGNANT",
+]
+
+
+
+# ======================================================
+# LIMITES FICHIERS
+# ======================================================
+
+
+MAX_IMAGE_SIZE = 5 * 1024 * 1024
+
+MAX_PDF_SIZE = 25 * 1024 * 1024
+
+MAX_AUDIO_SIZE = 50 * 1024 * 1024
+
+MAX_VIDEO_SIZE = 200 * 1024 * 1024
+
+MAX_DOCUMENT_SIZE = 30 * 1024 * 1024
+
+
+
+# ======================================================
+# EXTENSIONS AUTORISEES
+# ======================================================
+
+
+IMAGE_EXTENSIONS = {
+    "jpg",
+    "jpeg",
+    "png",
+    "webp",
+}
+
+
+PDF_EXTENSIONS = {
+    "pdf"
+}
+
+
+AUDIO_EXTENSIONS = {
+    "mp3",
+    "wav",
+    "m4a",
+    "aac",
+    "ogg",
+}
+
+
+VIDEO_EXTENSIONS = {
+    "mp4",
+    "mov",
+    "webm",
+    "mkv",
+}
+
+
+DOCUMENT_EXTENSIONS = {
+    "pdf",
+    "doc",
+    "docx",
+    "ppt",
+    "pptx",
+    "xls",
+    "xlsx",
+}
+
+
+
+# ======================================================
+# MIME
+# ======================================================
+
 
 ALLOWED_MIME_PREFIXES = {
-    "image": ["image/"],
-    "audio": ["audio/"],
-    "video": ["video/"],
+
+    "image": [
+        "image/"
+    ],
+
+    "audio": [
+        "audio/"
+    ],
+
+    "video": [
+        "video/"
+    ],
+
 }
 
+
+
 ALLOWED_MIME_TYPES = {
-    "pdf": ["application/pdf"],
-    "document": [
-        "application/pdf",
-        "application/msword",
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        "application/vnd.ms-powerpoint",
-        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-        "application/vnd.ms-excel",
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+
+    "pdf": [
+        "application/pdf"
     ],
+
+
+    "document": [
+
+        "application/pdf",
+
+        "application/msword",
+
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+
+        "application/vnd.ms-powerpoint",
+
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+
+        "application/vnd.ms-excel",
+
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+
+    ],
+
 }
+
+
+
+# ======================================================
+# VALIDATIONS
+# ======================================================
 
 
 def get_extension(filename: str) -> str:
+
     if not filename or "." not in filename:
-        raise HTTPException(status_code=400, detail="Fichier sans extension")
+
+        raise HTTPException(
+            status_code=400,
+            detail="Fichier sans extension"
+        )
+
 
     return filename.split(".")[-1].lower()
 
 
-def validate_extension(extension: str, allowed_extensions: set[str]):
+
+
+def validate_extension(
+    extension: str,
+    allowed_extensions: set[str]
+):
+
     if extension not in allowed_extensions:
+
         raise HTTPException(
             status_code=400,
             detail=f"Extension non autorisée: .{extension}"
         )
 
 
-def validate_mime(file: UploadFile, file_type: str):
-    content_type = file.content_type or mimetypes.guess_type(file.filename)[0]
+
+
+def validate_mime(
+    file: UploadFile,
+    file_type: str
+):
+
+    content_type = (
+        file.content_type
+        or mimetypes.guess_type(file.filename)[0]
+    )
+
 
     if not content_type:
+
         raise HTTPException(
             status_code=400,
             detail="Type MIME impossible à détecter"
         )
 
+
     if file_type in ALLOWED_MIME_PREFIXES:
+
         prefixes = ALLOWED_MIME_PREFIXES[file_type]
 
-        if not any(content_type.startswith(prefix) for prefix in prefixes):
+
+        if not any(
+            content_type.startswith(prefix)
+            for prefix in prefixes
+        ):
+
             raise HTTPException(
                 status_code=400,
                 detail=f"Type MIME invalide: {content_type}"
             )
+
+
 
     if file_type in ALLOWED_MIME_TYPES:
+
         allowed = ALLOWED_MIME_TYPES[file_type]
 
+
         if content_type not in allowed:
+
             raise HTTPException(
                 status_code=400,
                 detail=f"Type MIME invalide: {content_type}"
             )
+
+
+
+
+# ======================================================
+# NOUVEAU SAVE FILE R2
+# ======================================================
 
 
 async def save_file(
@@ -111,169 +282,207 @@ async def save_file(
     max_size: int,
     file_type: str,
 ):
-    extension = get_extension(file.filename)
 
-    validate_extension(extension, allowed_extensions)
-    validate_mime(file, file_type)
 
-    folder_path = BASE_UPLOAD_PATH / folder
-    folder_path.mkdir(parents=True, exist_ok=True)
+    extension = get_extension(
+        file.filename
+    )
 
-    filename = f"{uuid.uuid4()}.{extension}"
-    file_path = folder_path / filename
+
+    validate_extension(
+        extension,
+        allowed_extensions
+    )
+
+
+    validate_mime(
+        file,
+        file_type
+    )
+
+
+
+    # Lecture taille + contrôle avant upload
 
     size = 0
 
-    async with aiofiles.open(file_path, "wb") as out_file:
-        while chunk := await file.read(1024 * 1024):
-            size += len(chunk)
+    chunks = []
 
-            if size > max_size:
-                await out_file.close()
 
-                if file_path.exists():
-                    file_path.unlink()
+    while True:
 
-                raise HTTPException(
-                    status_code=413,
-                    detail="Fichier trop volumineux"
-                )
+        chunk = await file.read(
+            1024 * 1024
+        )
 
-            await out_file.write(chunk)
 
-    relative_path = f"{folder}/{filename}".replace("\\", "/")
+        if not chunk:
+
+            break
+
+
+        size += len(chunk)
+
+
+        if size > max_size:
+
+            raise HTTPException(
+                status_code=413,
+                detail="Fichier trop volumineux"
+            )
+
+
+        chunks.append(chunk)
+
+
+
+    file_bytes = b"".join(chunks)
+
+
+
+    # Upload Cloudflare R2
+
+    result = r2_storage.upload_bytes(
+        data=file_bytes,
+        filename=file.filename,
+        content_type=file.content_type,
+        folder=folder,
+    )
+
+
+
+    # IMPORTANT :
+    # On conserve le même format
+    # utilisé par la base et frontend
+
 
     return {
-        "file_url": relative_path,
-        "filename": filename,
-        "original_filename": file.filename,
-        "extension": extension,
-        "content_type": file.content_type,
-        "size_bytes": size,
+
+        "file_url": result["key"],
+
+        "filename": Path(
+            result["key"]
+        ).name,
+
+        "original_filename":
+            file.filename,
+
+        "extension":
+            extension,
+
+        "content_type":
+            file.content_type,
+
+        "size_bytes":
+            size,
+
+        "r2_key":
+            result["key"],
+
     }
 
 
-def delete_local_file(file_url:str):
-
-    path = safe_file_path(file_url)
-
-    if path.exists():
-        path.unlink()
-        return True
-
-    return False
 
 
-def safe_file_path(file_url: str) -> Path:
+# ======================================================
+# SUPPRESSION R2
+# ======================================================
+
+
+def delete_local_file(
+    file_url: str
+):
+
     """
-    Résout un chemin relatif stocké en base de données
-    vers un fichier situé dans le dossier uploads.
+    Ancien nom conservé
+    pour compatibilité.
 
-    Exemple de file_url :
-        contents/files/mon-cours.pdf
-        contents/videos/lecon.mp4
-        contents/audios/exercice.mp3
-        profiles/avatar.jpg
-        teacher_answers/reponse.pdf
+    Maintenant supprime dans R2.
     """
 
-    if not file_url or not file_url.strip():
-        raise HTTPException(
-            status_code=400,
-            detail="Chemin fichier vide"
-        )
+
+    if not file_url:
+
+        return False
+
+
 
     try:
-        relative_path = Path(file_url.replace("\\", "/").strip())
-        parts = relative_path.parts
 
-        if "uploads" in parts:
-            index = parts.index("uploads")
-            relative_path = Path(
-                *parts[index+1:]
-            )
-
-        # Refuse les chemins absolus
-        if relative_path.is_absolute():
-            raise HTTPException(
-                status_code=400,
-                detail="Chemin absolu interdit"
-            )
-
-        # Construit le chemin réel
-        path = (BASE_UPLOAD_PATH / relative_path).resolve()
-
-        # Empêche toute sortie du dossier uploads
-        path.relative_to(BASE_UPLOAD_PATH)
-
-    except ValueError:
-        raise HTTPException(
-            status_code=400,
-            detail="Accès interdit au fichier"
+        r2_storage.delete_file(
+            file_url
         )
 
-    except HTTPException:
-        raise
+        return True
+
 
     except Exception:
-        raise HTTPException(
-            status_code=400,
-            detail="Chemin fichier invalide"
-        )
 
-    print("=" * 80)
-    print("BASE_UPLOAD_PATH :", BASE_UPLOAD_PATH)
-    print("FILE_URL         :", file_url)
-    print("RESOLVED PATH    :", path)
-    print("PATH EXISTS      :", path.exists())
-    print("=" * 80)
-    
-    if not path.exists():
-        raise HTTPException(
-            status_code=404,
-            detail="Fichier introuvable"
-        )
-
-    if not path.is_file():
-        raise HTTPException(
-            status_code=400,
-            detail="Le chemin ne correspond pas à un fichier"
-        )
-
-    return path
+        return False
 
 
-def iter_file_range(path: Path, start: int, end: int, chunk_size: int = 1024 * 1024):
-    with open(path, "rb") as file:
-        file.seek(start)
-        remaining = end - start + 1
-
-        while remaining > 0:
-            read_size = min(chunk_size, remaining)
-            data = file.read(read_size)
-
-            if not data:
-                break
-
-            remaining -= len(data)
-            yield data
 
 
-def require_upload_access(db: Session, current_user, file_url: str):
-    normalized_url = file_url.replace("\\", "/")
-    db_content = (
-        db.query(Content)
-        .filter(
-            (Content.file_url == normalized_url)
-            | (Content.video_url == normalized_url)
-            | (Content.audio_url == normalized_url)
-            | (Content.thumbnail_url == normalized_url)
-        )
-        .first()
+
+# ======================================================
+# ACCES PREMIUM
+# ======================================================
+
+
+def require_upload_access(
+    db: Session,
+    current_user,
+    file_url: str
+):
+
+
+    normalized_url = (
+        file_url
+        .replace("\\", "/")
     )
 
-    if db_content and db_content.is_premium and current_user.role == "ELEVE":
-        require_premium_access(db, current_user.id)
+
+    db_content = (
+
+        db.query(Content)
+
+        .filter(
+
+            (Content.file_url == normalized_url)
+
+            |
+
+            (Content.video_url == normalized_url)
+
+            |
+
+            (Content.audio_url == normalized_url)
+
+            |
+
+            (Content.thumbnail_url == normalized_url)
+
+        )
+
+        .first()
+
+    )
+
+
+    if (
+
+        db_content
+
+        and db_content.is_premium
+
+        and current_user.role == "ELEVE"
+
+    ):
+
+        require_premium_access(
+            db,
+            current_user.id
+        )
 
 
 @router.post("/profile")
