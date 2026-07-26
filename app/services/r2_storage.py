@@ -380,7 +380,46 @@ class R2StorageService:
             raise RuntimeError(
                 f"Fichier R2 introuvable : {str(e)}"
             )
+
+    def get_file(
+        self,
+        key: str
+    ):
+        """
+        Récupère un fichier R2 complet
+        avec stream + metadata
+        """
     
+        try:
+    
+            response = self.client.get_object(
+                Bucket=self.bucket,
+                Key=key
+            )
+    
+    
+            return {
+    
+                "body": response["Body"],
+    
+                "size": response.get(
+                    "ContentLength"
+                ),
+    
+                "content_type": response.get(
+                    "ContentType"
+                )
+                or "application/octet-stream",
+    
+            }
+    
+    
+        except ClientError as e:
+    
+            raise RuntimeError(
+                f"Erreur lecture R2 : {str(e)}"
+            )
+        
     def public_url(
         self,
         key: str
