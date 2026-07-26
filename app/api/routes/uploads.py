@@ -540,6 +540,7 @@ async def upload_content_file(
     file: UploadFile = File(...),
     current_user=Depends(require_roles(CONTENT_ROLES)),
 ):
+
     result = await save_file(
         file=file,
         folder="contents/files",
@@ -547,6 +548,7 @@ async def upload_content_file(
         max_size=MAX_DOCUMENT_SIZE,
         file_type="document",
     )
+
 
     return {
         "message": "Fichier de contenu uploadé",
@@ -559,6 +561,7 @@ async def upload_content_thumbnail(
     file: UploadFile = File(...),
     current_user=Depends(require_roles(CONTENT_ROLES)),
 ):
+
     result = await save_file(
         file=file,
         folder="contents/thumbnails",
@@ -566,6 +569,7 @@ async def upload_content_thumbnail(
         max_size=MAX_IMAGE_SIZE,
         file_type="image",
     )
+
 
     return {
         "message": "Miniature uploadée",
@@ -578,6 +582,7 @@ async def upload_content_video(
     file: UploadFile = File(...),
     current_user=Depends(require_roles(CONTENT_ROLES)),
 ):
+
     result = await save_file(
         file=file,
         folder="contents/videos",
@@ -585,6 +590,7 @@ async def upload_content_video(
         max_size=MAX_VIDEO_SIZE,
         file_type="video",
     )
+
 
     return {
         "message": "Vidéo uploadée",
@@ -597,6 +603,7 @@ async def upload_content_audio(
     file: UploadFile = File(...),
     current_user=Depends(require_roles(CONTENT_ROLES)),
 ):
+
     result = await save_file(
         file=file,
         folder="contents/audios",
@@ -604,6 +611,7 @@ async def upload_content_audio(
         max_size=MAX_AUDIO_SIZE,
         file_type="audio",
     )
+
 
     return {
         "message": "Audio uploadé",
@@ -616,6 +624,7 @@ async def upload_question_image(
     file: UploadFile = File(...),
     current_user=Depends(get_current_user),
 ):
+
     result = await save_file(
         file=file,
         folder="questions/images",
@@ -623,6 +632,7 @@ async def upload_question_image(
         max_size=MAX_IMAGE_SIZE,
         file_type="image",
     )
+
 
     return {
         "message": "Image de question uploadée",
