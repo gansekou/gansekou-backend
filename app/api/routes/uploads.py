@@ -486,40 +486,28 @@ def require_upload_access(
         )
 
 
-def get_r2_file_info(file_url: str):
+def get_r2_file_info(
+    file_url: str
+):
 
     try:
 
-        response = r2_storage.download_file(
-            file_url
+        metadata = (
+            r2_storage
+            .get_file_metadata(
+                file_url
+            )
         )
 
 
-        return {
-
-            "body":
-                response["Body"],
-
-            "content_type":
-                response.get(
-                    "ContentType"
-                )
-                or "application/octet-stream",
-
-
-            "size":
-                response.get(
-                    "ContentLength"
-                ),
-
-        }
+        return metadata
 
 
     except Exception as e:
 
         raise HTTPException(
             status_code=404,
-            detail=f"Fichier introuvable dans R2 : {str(e)}"
+            detail=str(e)
         )
 
 def stream_r2_range(
@@ -1112,16 +1100,26 @@ def stream_secure_file(
 
 
 
-    file = get_r2_file_info(
+    metadata = get_r2_file_info(
         file_url
     )
-
-
-    body = file["body"]
+    
+    size = metadata["size"]
+    
+    content_type = metadata["content_type"]
 
     size = file["size"]
 
     content_type = file["content_type"]
+
+    r2_response = r2_storage.download_file(
+        file_url,
+        range_start=start,
+        range_end=end
+    )
+
+
+    body = r2_response["Body"]
 
 
 
@@ -1139,26 +1137,21 @@ def stream_secure_file(
 
 
         return StreamingResponse(
-
             body,
-
-            media_type=
-                content_type,
-
+            status_code=206,
+            media_type=content_type,
             headers={
-
-                "Content-Length":
-                    str(size),
-
+                "Content-Range":
+                    f"bytes {start}-{end}/{size}",
+        
                 "Accept-Ranges":
                     "bytes",
-
-                "Content-Disposition":
-                    "inline",
-
+        
+                "Content-Length":
+                    str(chunk_size),
+        
                 "Cache-Control":
                     "private",
-
             }
         )
 
@@ -1260,6 +1253,7 @@ def stream_secure_file(
 
         }
     )
+
 
 
 @router.get("/download")
