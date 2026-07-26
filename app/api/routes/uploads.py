@@ -485,6 +485,85 @@ def require_upload_access(
         )
 
 
+def get_r2_file_info(file_url: str):
+    """
+    Récupère un fichier depuis Cloudflare R2
+    """
+
+    if not file_url:
+        raise HTTPException(
+            status_code=400,
+            detail="Fichier non spécifié"
+        )
+
+
+    try:
+
+        response = r2_storage.download_file(
+            file_url
+        )
+
+
+        return {
+
+            "body": response["Body"],
+
+            "content_type":
+                response.get(
+                    "ContentType",
+                    "application/octet-stream"
+                ),
+
+            "size":
+                response.get(
+                    "ContentLength"
+                ),
+
+            "etag":
+                response.get(
+                    "ETag"
+                )
+
+        }
+
+
+    except Exception as e:
+
+        raise HTTPException(
+            status_code=404,
+            detail=f"Fichier R2 introuvable : {str(e)}"
+        )
+
+def stream_r2_range(
+    file_url: str,
+    start: int,
+    end: int,
+    chunk_size: int = 1024 * 1024
+):
+
+    """
+    Streaming par morceaux depuis Cloudflare R2
+    """
+
+    response = r2_storage.download_file(
+        file_url,
+        range_start=start,
+        range_end=end
+    )
+
+
+    body = response["Body"]
+
+
+    while True:
+
+        chunk = body.read(chunk_size)
+
+        if not chunk:
+            break
+
+        yield chunk
+
 @router.post("/profile")
 async def upload_profile_image(
     file: UploadFile = File(...),
@@ -681,7 +760,7 @@ def create_file_access_url(
 ):
 
     # Vérifie que le fichier existe
-    safe_file_path(file_url)
+    get_r2_file_info(file_url)
 
 
     # Vérifie les droits premium
@@ -717,14 +796,18 @@ def create_file_access_url(
 def get_public_uploaded_file(
     file_url: str = Query(...),
 ):
-    path = safe_file_path(file_url)
 
-    return FileResponse(
-        path=str(path),
-        media_type=mimetypes.guess_type(str(path))[0]
-        or "application/octet-stream",
+    file = get_r2_file_info(
+        file_url
+    )
+
+
+    return StreamingResponse(
+        file["body"],
+        media_type=file["content_type"],
         headers={
-            "Cache-Control": "public, max-age=86400",
+            "Cache-Control":
+                "public, max-age=86400"
         },
     )
 
@@ -734,17 +817,30 @@ def get_uploaded_file(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    path = safe_file_path(file_url)
-    require_upload_access(db, current_user, file_url)
 
-    return FileResponse(
-    path=str(path),
-    media_type=mimetypes.guess_type(str(path))[0] or "application/octet-stream",
-    headers={
-        "Content-Disposition": "inline",
-        "Cache-Control": "private, max-age=3600",
-    },
-)
+    require_upload_access(
+        db,
+        current_user,
+        file_url
+    )
+
+
+    file = get_r2_file_info(
+        file_url
+    )
+
+
+    return StreamingResponse(
+        file["body"],
+        media_type=file["content_type"],
+        headers={
+            "Content-Disposition":
+                "inline",
+
+            "Cache-Control":
+                "private, max-age=3600",
+        },
+    )
 
 
 @router.delete("/file")
@@ -794,7 +890,6 @@ def stream_uploaded_file(
     current_user=Depends(get_current_user),
 ):
 
-    path = safe_file_path(file_url)
 
     require_upload_access(
         db,
@@ -802,23 +897,36 @@ def stream_uploaded_file(
         file_url
     )
 
-    file_size = path.stat().st_size
 
-    content_type = (
-        mimetypes.guess_type(str(path))[0]
-        or "application/octet-stream"
+    file = get_r2_file_info(
+        file_url
     )
 
-    range_header = request.headers.get("range")
+
+    file_size = file["size"]
+
+    content_type = file["content_type"]
+
+
+    range_header = request.headers.get(
+        "range"
+    )
 
 
     if range_header:
 
-        range_value = range_header.replace("bytes=", "")
 
-        start_str, end_str = range_value.split("-")
+        value = range_header.replace(
+            "bytes=",
+            ""
+        )
+
+
+        start_str, end_str = value.split("-")
+
 
         start = int(start_str)
+
 
         end = (
             int(end_str)
@@ -827,53 +935,78 @@ def stream_uploaded_file(
         )
 
 
-        if start >= file_size:
-            raise HTTPException(
-                status_code=416,
-                detail="Range invalide"
-            )
+        end = min(
+            end,
+            file_size - 1
+        )
 
 
-        end = min(end, file_size - 1)
+        content_length = (
+            end - start + 1
+        )
 
 
         headers = {
-            "Content-Range": f"bytes {start}-{end}/{file_size}",
-            "Accept-Ranges": "bytes",
-            "Content-Length": str(end-start+1),
-            "Content-Disposition": "inline",
-            "Cache-Control": "private",
+
+            "Content-Range":
+            f"bytes {start}-{end}/{file_size}",
+
+            "Accept-Ranges":
+            "bytes",
+
+            "Content-Length":
+            str(content_length),
+
+            "Cache-Control":
+            "private",
+
         }
 
 
         return StreamingResponse(
-            iter_file_range(
-                path,
+
+            stream_r2_range(
+                file_url,
                 start,
                 end
             ),
+
             status_code=206,
+
             headers=headers,
-            media_type=content_type,
+
+            media_type=content_type
+
         )
 
 
+
     headers = {
-        "Content-Length": str(file_size),
-        "Accept-Ranges": "bytes",
-        "Content-Disposition": "inline",
-        "Cache-Control": "private",
+
+
+        "Content-Length":
+            str(file_size),
+
+
+        "Accept-Ranges":
+            "bytes",
+
+
+        "Cache-Control":
+            "private",
+
     }
 
 
+
     return StreamingResponse(
-        iter_file_range(
-            path,
-            0,
-            file_size-1
-        ),
+
+        file["body"],
+
         headers=headers,
-        media_type=content_type,
+
+        media_type=content_type
+
     )
 
 @router.get("/stream-secure")
@@ -883,6 +1016,7 @@ def stream_secure_file(
     db: Session = Depends(get_db),
 ):
 
+
     try:
 
         payload = jwt.decode(
@@ -890,6 +1024,7 @@ def stream_secure_file(
             settings.SECRET_KEY,
             algorithms=["HS256"]
         )
+
 
     except Exception:
 
@@ -899,16 +1034,14 @@ def stream_secure_file(
         )
 
 
-    file_url = payload.get("file_url")
-    user_id = payload.get("user_id")
+    file_url = payload.get(
+        "file_url"
+    )
 
 
-    if not file_url or not user_id:
-
-        raise HTTPException(
-            status_code=403,
-            detail="Token incomplet"
-        )
+    user_id = payload.get(
+        "user_id"
+    )
 
 
     user = (
@@ -933,50 +1066,47 @@ def stream_secure_file(
     )
 
 
-    path = safe_file_path(file_url)
-
-
-    file_size = path.stat().st_size
-
-
-    content_type = (
-        mimetypes.guess_type(str(path))[0]
-        or "application/octet-stream"
+    file = get_r2_file_info(
+        file_url
     )
 
 
-    range_header = request.headers.get("range")
+    size = file["size"]
+
+    content_type = file["content_type"]
+
+
+    range_header = request.headers.get(
+        "range"
+    )
 
 
     if range_header:
 
-        range_value = range_header.replace(
+
+        value = range_header.replace(
             "bytes=",
             ""
         )
 
-        start_str, end_str = range_value.split("-")
+
+        start_str,end_str = value.split("-")
 
 
-        start = int(start_str)
+        start=int(start_str)
+
 
         end = (
             int(end_str)
             if end_str
-            else file_size - 1
+            else size-1
         )
 
 
-        end = min(
-            end,
-            file_size - 1
-        )
-
-
-        headers = {
+        headers={
 
             "Content-Range":
-            f"bytes {start}-{end}/{file_size}",
+            f"bytes {start}-{end}/{size}",
 
             "Accept-Ranges":
             "bytes",
@@ -984,52 +1114,43 @@ def stream_secure_file(
             "Content-Length":
             str(end-start+1),
 
-            "Content-Disposition":
-            "inline",
-
-            "Cache-Control":
-            "private",
-
         }
 
 
+
         return StreamingResponse(
-            iter_file_range(
-                path,
+
+            stream_r2_range(
+                file_url,
                 start,
                 end
             ),
+
             status_code=206,
+
             headers=headers,
+
             media_type=content_type
+
         )
 
 
-    headers = {
-
-        "Accept-Ranges":
-        "bytes",
-
-        "Content-Length":
-        str(file_size),
-
-        "Content-Disposition":
-        "inline",
-
-        "Cache-Control":
-        "private",
-
-    }
-
-
     return StreamingResponse(
-        iter_file_range(
-            path,
-            0,
-            file_size-1
-        ),
-        headers=headers,
+
+        file["body"],
+
+        headers={
+
+            "Content-Length":
+            str(size),
+
+            "Accept-Ranges":
+            "bytes"
+
+        },
+
         media_type=content_type
+
     )
 
 
@@ -1039,34 +1160,67 @@ def download_uploaded_file(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    path = safe_file_path(file_url)
-    require_upload_access(db, current_user, file_url)
 
-    return FileResponse(
-        path=str(path),
-        filename=path.name,
-        media_type="application/octet-stream"
+    require_upload_access(
+        db,
+        current_user,
+        file_url
     )
 
 
-@router.get("/thumbnail/{filename}")
-def get_thumbnail(filename:str):
-
-    path = (
-        BASE_UPLOAD_PATH
-        / "contents"
-        / "thumbnails"
-        / filename
+    file = get_r2_file_info(
+        file_url
     )
 
-    if not path.exists():
-        raise HTTPException(
-            status_code=404,
-            detail="Image introuvable"
+
+    filename = Path(
+        file_url
+    ).name
+
+
+    return StreamingResponse(
+        file["body"],
+        media_type="application/octet-stream",
+        headers={
+            "Content-Disposition":
+                f'attachment; filename="{filename}"'
+        },
+    )
+
+@router.get("/thumbnail/{filename:path}")
+def get_thumbnail(
+    filename: str
+):
+
+
+    if filename.startswith(
+        "contents/thumbnails/"
+    ):
+
+        key = filename
+
+    else:
+
+        key = (
+            "contents/thumbnails/"
+            + filename
         )
 
 
-    return FileResponse(
-        path=str(path),
-        media_type="image/jpeg"
+    file = get_r2_file_info(
+        key
+    )
+
+
+    return StreamingResponse(
+
+        file["body"],
+
+        media_type=file["content_type"],
+
+        headers={
+            "Cache-Control":
+            "public,max-age=86400"
+        }
+
     )
