@@ -258,28 +258,28 @@ class R2StorageService:
 
     def download_file(
         self,
-        key: str
+        key,
+        range_start=None,
+        range_end=None
     ):
-
-        """
-        Retourne le flux fichier
-        """
-
-        try:
-
-            response = self.client.get_object(
-                Bucket=self.bucket,
-                Key=key
+    
+    
+        params = {
+            "Bucket": self.bucket,
+            "Key": key
+        }
+    
+    
+        if range_start is not None:
+    
+            params["Range"] = (
+                f"bytes={range_start}-{range_end}"
             )
-
-            return response
-
-
-        except ClientError as e:
-
-            raise RuntimeError(
-                f"Fichier introuvable : {e}"
-            )
+    
+    
+        return self.client.get_object(
+            **params
+        )
 
 
 
