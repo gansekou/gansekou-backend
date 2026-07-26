@@ -1308,3 +1308,42 @@ def get_thumbnail(
         }
 
     )
+
+
+@router.get("/profile/{filename:path}")
+def get_profile_image(
+    filename: str
+):
+
+    if filename.startswith(
+        "profiles/"
+    ):
+        key = filename
+
+    else:
+        key = (
+            "profiles/"
+            + filename
+        )
+
+
+    file = get_r2_file_info(
+        key
+    )
+
+
+    return StreamingResponse(
+
+        file["body"],
+
+        media_type=file["content_type"],
+
+        headers={
+            "Cache-Control":
+                "public,max-age=86400"
+        }
+
+    )
+
+
+
