@@ -21,6 +21,7 @@ from datetime import datetime
 import boto3
 from botocore.client import Config
 from botocore.exceptions import ClientError
+from boto3.s3.transfer import TransferConfig
 
 from app.core.config import settings
 
@@ -331,7 +332,7 @@ class R2StorageService:
             ExpiresIn=expires
         )
 
-
+    
 
     def get_file_metadata(
         self,
