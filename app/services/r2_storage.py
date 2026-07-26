@@ -258,28 +258,53 @@ class R2StorageService:
 
     def download_file(
         self,
-        key,
+        key: str,
         range_start=None,
-        range_end=None
+        range_end=None,
     ):
+        """
+        Lecture streaming depuis Cloudflare R2
     
+        Supporte :
+        - gros fichiers
+        - vidéos
+        - audio
+        - HTTP Range
+        """
     
         params = {
             "Bucket": self.bucket,
-            "Key": key
+            "Key": key,
         }
     
     
         if range_start is not None:
     
-            params["Range"] = (
-                f"bytes={range_start}-{range_end}"
+            if range_end is not None:
+    
+                params["Range"] = (
+                    f"bytes={range_start}-{range_end}"
+                )
+    
+            else:
+    
+                params["Range"] = (
+                    f"bytes={range_start}-"
+                )
+    
+    
+        try:
+    
+            return self.client.get_object(
+                **params
             )
     
     
-        return self.client.get_object(
-            **params
-        )
+        except ClientError as e:
+    
+            raise RuntimeError(
+                f"Erreur lecture R2 : {str(e)}"
+            )
 
 
 
