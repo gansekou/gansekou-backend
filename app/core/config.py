@@ -23,6 +23,11 @@ class Settings(BaseSettings):
     CAMPAY_APP_ID: str | None = None
     CAMPAY_TOKEN: str | None = None
     CAMPAY_WEBHOOK_KEY: str | None = None
+    R2_ACCOUNT_ID: str
+    R2_BUCKET_NAME: str
+    R2_ACCESS_KEY_ID: str
+    R2_SECRET_ACCESS_KEY: str
+    R2_ENDPOINT: str
 
     @field_validator("DATABASE_URL", mode="before")
     @classmethod
