@@ -1041,6 +1041,10 @@ def stream_secure_file(
     db: Session = Depends(get_db),
 ):
 
+    # ==============================
+    # Vérification du token JWT
+    # ==============================
+
     try:
 
         payload = jwt.decode(
@@ -1048,7 +1052,6 @@ def stream_secure_file(
             settings.SECRET_KEY,
             algorithms=["HS256"]
         )
-
 
     except Exception:
 
@@ -1075,6 +1078,9 @@ def stream_secure_file(
         )
 
 
+    # ==============================
+    # Vérification utilisateur
+    # ==============================
 
     user = (
         db.query(User)
@@ -1093,6 +1099,9 @@ def stream_secure_file(
         )
 
 
+    # ==============================
+    # Vérification accès premium
+    # ==============================
 
     require_upload_access(
         db,
@@ -1101,93 +1110,132 @@ def stream_secure_file(
     )
 
 
+    # ==============================
+    # Récupération metadata R2
+    # (sans télécharger tout le fichier)
+    # ==============================
 
-    metadata = get_r2_file_info(
+    metadata = r2_storage.get_file_metadata(
         file_url
     )
-    
-    file = get_r2_file_info(
-    file_url
-)
-
-size = file["size"]
-
-content_type = file["content_type"]
-
-body = file["body"]
 
 
-range_header = request.headers.get(
-    "range"
-)
+    size = metadata["size"]
+
+    content_type = metadata["content_type"]
 
 
-if not range_header:
+
+    range_header = request.headers.get(
+        "range"
+    )
+
+
+    # ==============================
+    # Lecture complète
+    # ==============================
+
+    if not range_header:
+
+
+        response = r2_storage.download_file(
+            file_url
+        )
+
+
+        return StreamingResponse(
+
+            response["Body"],
+
+            status_code=200,
+
+            media_type=content_type,
+
+            headers={
+
+                "Content-Length":
+                    str(size),
+
+                "Accept-Ranges":
+                    "bytes",
+
+                "Content-Disposition":
+                    "inline",
+
+                "Cache-Control":
+                    "private",
+
+            }
+
+        )
+
+
+
+    # ==============================
+    # Lecture partielle vidéo/audio
+    # ==============================
+
+    byte_range = parse_range_header(
+        range_header,
+        size
+    )
+
+
+    if not byte_range:
+
+        raise HTTPException(
+            status_code=416,
+            detail="Range invalide"
+        )
+
+
+    start, end = byte_range
+
+
+    chunk_size = (
+        end - start + 1
+    )
+
+
+    response = r2_storage.download_file(
+        file_url,
+        range_start=start,
+        range_end=end
+    )
+
 
     return StreamingResponse(
-        body,
-        status_code=200,
+
+        response["Body"],
+
+        status_code=206,
+
         media_type=content_type,
+
         headers={
-            "Content-Length": str(size),
-            "Accept-Ranges": "bytes",
-            "Content-Disposition": "inline",
-            "Cache-Control": "private",
+
+            "Content-Range":
+                f"bytes {start}-{end}/{size}",
+
+
+            "Accept-Ranges":
+                "bytes",
+
+
+            "Content-Length":
+                str(chunk_size),
+
+
+            "Content-Disposition":
+                "inline",
+
+
+            "Cache-Control":
+                "private",
+
         }
+
     )
-
-
-byte_range = parse_range_header(
-    range_header,
-    size
-)
-
-
-if not byte_range:
-
-    raise HTTPException(
-        status_code=416,
-        detail="Range invalide"
-    )
-
-
-start, end = byte_range
-
-
-chunk_size = end - start + 1
-
-
-r2_response = r2_storage.download_file(
-    file_url,
-    range_start=start,
-    range_end=end
-)
-
-
-body = r2_response["Body"]
-
-
-return StreamingResponse(
-    body,
-    status_code=206,
-    media_type=content_type,
-    headers={
-        "Content-Range":
-            f"bytes {start}-{end}/{size}",
-
-        "Accept-Ranges":
-            "bytes",
-
-        "Content-Length":
-            str(chunk_size),
-
-        "Content-Disposition":
-            "inline",
-
-        "Cache-Control":
-            "private",
-    }
-)
 
 
 @router.get("/download")
