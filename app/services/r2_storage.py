@@ -23,6 +23,7 @@ from botocore.client import Config
 from botocore.exceptions import ClientError
 from boto3.s3.transfer import TransferConfig
 
+
 from app.core.config import settings
 
 
@@ -45,9 +46,11 @@ class R2StorageService:
             raise RuntimeError(
                 "Configuration Cloudflare R2 incomplète"
             )
-
+    
+    
         self.bucket = settings.R2_BUCKET_NAME
-
+    
+    
         self.client = boto3.client(
             "s3",
             endpoint_url=settings.R2_ENDPOINT,
@@ -58,7 +61,15 @@ class R2StorageService:
             ),
             region_name="auto",
         )
-
+    
+    
+        # Configuration upload gros fichiers
+        self.transfer_config = TransferConfig(
+            multipart_threshold=50 * 1024 * 1024,
+            multipart_chunksize=50 * 1024 * 1024,
+            max_concurrency=10,
+            use_threads=True,
+        )
 
     def generate_filename(
         self,
@@ -137,7 +148,8 @@ class R2StorageService:
                 key,
                 ExtraArgs={
                     "ContentType": content_type
-                }
+                },
+                Config=self.transfer_config
             )
 
 
