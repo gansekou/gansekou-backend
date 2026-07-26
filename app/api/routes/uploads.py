@@ -14,6 +14,7 @@ from fastapi import (
 from fastapi.responses import (
     StreamingResponse,
 )
+from botocore.response import StreamingBody
 
 from sqlalchemy.orm import Session
 
@@ -1016,32 +1017,22 @@ def stream_secure_file(
     db: Session = Depends(get_db),
 ):
 
-
     try:
-
         payload = jwt.decode(
             token,
             settings.SECRET_KEY,
             algorithms=["HS256"]
         )
 
-
     except Exception:
-
         raise HTTPException(
             status_code=403,
             detail="Lien expiré ou invalide"
         )
 
 
-    file_url = payload.get(
-        "file_url"
-    )
-
-
-    user_id = payload.get(
-        "user_id"
-    )
+    file_url = payload.get("file_url")
+    user_id = payload.get("user_id")
 
 
     user = (
@@ -1052,7 +1043,6 @@ def stream_secure_file(
 
 
     if not user:
-
         raise HTTPException(
             status_code=403,
             detail="Utilisateur inexistant"
@@ -1066,91 +1056,39 @@ def stream_secure_file(
     )
 
 
-    file = get_r2_file_info(
+    response = r2_storage.download_file(
         file_url
     )
 
 
-    size = file["size"]
+    body = response["Body"]
 
-    content_type = file["content_type"]
+    size = response["ContentLength"]
 
-
-    range_header = request.headers.get(
-        "range"
+    content_type = (
+        response.get("ContentType")
+        or "application/octet-stream"
     )
 
 
-    if range_header:
+    headers = {
 
+        "Accept-Ranges": "bytes",
 
-        value = range_header.replace(
-            "bytes=",
-            ""
-        )
+        "Content-Length": str(size),
 
+        "Content-Disposition": "inline",
 
-        start_str,end_str = value.split("-")
+        "Cache-Control":
+            "private, max-age=3600",
 
-
-        start=int(start_str)
-
-
-        end = (
-            int(end_str)
-            if end_str
-            else size-1
-        )
-
-
-        headers={
-
-            "Content-Range":
-            f"bytes {start}-{end}/{size}",
-
-            "Accept-Ranges":
-            "bytes",
-
-            "Content-Length":
-            str(end-start+1),
-
-        }
-
-
-
-        return StreamingResponse(
-
-            stream_r2_range(
-                file_url,
-                start,
-                end
-            ),
-
-            status_code=206,
-
-            headers=headers,
-
-            media_type=content_type
-
-        )
+    }
 
 
     return StreamingResponse(
-
-        file["body"],
-
-        headers={
-
-            "Content-Length":
-            str(size),
-
-            "Accept-Ranges":
-            "bytes"
-
-        },
-
+        body,
+        headers=headers,
         media_type=content_type
-
     )
 
 
