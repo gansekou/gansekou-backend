@@ -487,16 +487,6 @@ def require_upload_access(
 
 
 def get_r2_file_info(file_url: str):
-    """
-    Récupère un fichier depuis Cloudflare R2
-    """
-
-    if not file_url:
-        raise HTTPException(
-            status_code=400,
-            detail="Fichier non spécifié"
-        )
-
 
     try:
 
@@ -507,23 +497,20 @@ def get_r2_file_info(file_url: str):
 
         return {
 
-            "body": response["Body"],
+            "body":
+                response["Body"],
 
             "content_type":
                 response.get(
-                    "ContentType",
-                    "application/octet-stream"
-                ),
+                    "ContentType"
+                )
+                or "application/octet-stream",
+
 
             "size":
                 response.get(
                     "ContentLength"
                 ),
-
-            "etag":
-                response.get(
-                    "ETag"
-                )
 
         }
 
@@ -532,7 +519,7 @@ def get_r2_file_info(file_url: str):
 
         raise HTTPException(
             status_code=404,
-            detail=f"Fichier R2 introuvable : {str(e)}"
+            detail=f"Fichier introuvable dans R2 : {str(e)}"
         )
 
 def stream_r2_range(
@@ -564,6 +551,53 @@ def stream_r2_range(
             break
 
         yield chunk
+
+
+def parse_range_header(
+    range_header: str,
+    file_size: int
+):
+
+    """
+    Analyse:
+    bytes=start-end
+
+    retourne:
+    start,end
+    """
+
+
+    if not range_header.startswith("bytes="):
+
+        return None
+
+
+
+    range_value = (
+        range_header
+        .replace("bytes=", "")
+    )
+
+
+    parts = range_value.split("-")
+
+
+    start = int(parts[0])
+
+
+    end = (
+        int(parts[1])
+        if parts[1]
+        else file_size - 1
+    )
+
+
+    if end >= file_size:
+
+        end = file_size - 1
+
+
+    return start,end
 
 @router.post("/profile")
 async def upload_profile_image(
@@ -1018,35 +1052,56 @@ def stream_secure_file(
 ):
 
     try:
+
         payload = jwt.decode(
             token,
             settings.SECRET_KEY,
             algorithms=["HS256"]
         )
 
+
     except Exception:
+
         raise HTTPException(
             status_code=403,
             detail="Lien expiré ou invalide"
         )
 
 
-    file_url = payload.get("file_url")
-    user_id = payload.get("user_id")
+    file_url = payload.get(
+        "file_url"
+    )
+
+    user_id = payload.get(
+        "user_id"
+    )
+
+
+    if not file_url or not user_id:
+
+        raise HTTPException(
+            status_code=403,
+            detail="Token incomplet"
+        )
+
 
 
     user = (
         db.query(User)
-        .filter(User.id == user_id)
+        .filter(
+            User.id == user_id
+        )
         .first()
     )
 
 
     if not user:
+
         raise HTTPException(
             status_code=403,
             detail="Utilisateur inexistant"
         )
+
 
 
     require_upload_access(
@@ -1056,39 +1111,154 @@ def stream_secure_file(
     )
 
 
-    response = r2_storage.download_file(
+
+    file = get_r2_file_info(
         file_url
     )
 
 
-    body = response["Body"]
+    body = file["body"]
 
-    size = response["ContentLength"]
+    size = file["size"]
 
-    content_type = (
-        response.get("ContentType")
-        or "application/octet-stream"
+    content_type = file["content_type"]
+
+
+
+    range_header = request.headers.get(
+        "range"
     )
 
 
-    headers = {
 
-        "Accept-Ranges": "bytes",
+    # ==============================
+    # Lecture normale
+    # ==============================
 
-        "Content-Length": str(size),
+    if not range_header:
 
-        "Content-Disposition": "inline",
 
-        "Cache-Control":
-            "private, max-age=3600",
+        return StreamingResponse(
 
-    }
+            body,
+
+            media_type=
+                content_type,
+
+            headers={
+
+                "Content-Length":
+                    str(size),
+
+                "Accept-Ranges":
+                    "bytes",
+
+                "Content-Disposition":
+                    "inline",
+
+                "Cache-Control":
+                    "private",
+
+            }
+        )
+
+
+
+    # ==============================
+    # Lecture partielle VIDEO/AUDIO
+    # ==============================
+
+
+    byte_range = parse_range_header(
+        range_header,
+        size
+    )
+
+
+    if not byte_range:
+
+        raise HTTPException(
+            status_code=416,
+            detail="Range invalide"
+        )
+
+
+    start,end = byte_range
+
+
+
+    chunk_size = (
+        end-start+1
+    )
+
+
+
+    # déplacement dans R2
+
+    body.seek(
+        start
+    )
+
+
+    def iter_file():
+
+        remaining = chunk_size
+
+
+        while remaining > 0:
+
+
+            chunk = body.read(
+                min(
+                    1024*1024,
+                    remaining
+                )
+            )
+
+
+            if not chunk:
+
+                break
+
+
+            remaining -= len(chunk)
+
+
+            yield chunk
+
 
 
     return StreamingResponse(
-        body,
-        headers=headers,
-        media_type=content_type
+
+        iter_file(),
+
+        status_code=206,
+
+        media_type=
+            content_type,
+
+        headers={
+
+            "Content-Range":
+                f"bytes {start}-{end}/{size}",
+
+
+            "Accept-Ranges":
+                "bytes",
+
+
+            "Content-Length":
+                str(chunk_size),
+
+
+            "Content-Disposition":
+                "inline",
+
+
+            "Cache-Control":
+                "private",
+
+        }
     )
 
 
