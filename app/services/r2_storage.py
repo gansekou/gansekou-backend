@@ -333,6 +333,41 @@ class R2StorageService:
 
 
 
+    def get_file_metadata(
+        self,
+        key: str
+    ):
+    
+        try:
+    
+            response = self.client.head_object(
+                Bucket=self.bucket,
+                Key=key
+            )
+    
+    
+            return {
+    
+                "size":
+                    response.get(
+                        "ContentLength"
+                    ),
+    
+                "content_type":
+                    response.get(
+                        "ContentType"
+                    )
+                    or "application/octet-stream",
+    
+            }
+    
+    
+        except ClientError as e:
+    
+            raise RuntimeError(
+                f"Fichier R2 introuvable : {str(e)}"
+            )
+    
     def public_url(
         self,
         key: str
