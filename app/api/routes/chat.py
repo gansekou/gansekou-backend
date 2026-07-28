@@ -139,3 +139,33 @@ def get_chat_history(
     return conversation
 
 
+@router.delete("/{conversation_id}")
+def delete_conversation(
+    conversation_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+
+    conversation = (
+        db.query(ChatConversation)
+        .filter(
+            ChatConversation.id == conversation_id,
+            ChatConversation.user_id == current_user.id,
+        )
+        .first()
+    )
+
+    if not conversation:
+        raise HTTPException(
+            status_code=404,
+            detail="Conversation introuvable"
+        )
+
+    db.delete(conversation)
+    db.commit()
+
+    return {
+        "success": True
+    }
+
+
