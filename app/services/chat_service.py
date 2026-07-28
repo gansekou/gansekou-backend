@@ -319,16 +319,32 @@ def get_conversation_messages(
 
 
 def update_conversation_title(
-    db: Session,
-    conversation: ChatConversation,
-    title: str,
+    db,
+    conversation,
+    first_message: str
 ):
 
+    if not conversation:
+        return
+
+
+    # éviter de remplacer un vrai titre
+    if conversation.title != "Nouvelle discussion":
+        return
+
+
+    title = first_message.strip()
+
+
+    # longueur maximale
+    if len(title) > 50:
+        title = title[:50] + "..."
+
+
     conversation.title = title
+
 
     db.commit()
 
     db.refresh(conversation)
-
-    return conversation
 
