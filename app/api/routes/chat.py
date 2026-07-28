@@ -55,31 +55,18 @@ def chat_message(
     )
 
 
-    user_text = payload["message"]
-
-
     message = send_message(
         db,
         conversation,
-        user_text,
+        payload["message"],
     )
 
 
-    if conversation.title == "Nouvelle discussion":
-
-
-        title = user_text[:40]
-
-
-        if len(user_text) > 40:
-            title += "..."
-
-
-        update_conversation_title(
-            db,
-            conversation,
-            title
-        )
+    update_conversation_title(
+        db,
+        conversation,
+        payload["message"]
+    )
 
 
     return {
