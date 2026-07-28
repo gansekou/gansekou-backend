@@ -12,8 +12,8 @@ from app.models.chat_conversation import ChatConversation
 from app.services.chat_service import (
     create_conversation,
     send_message,
+    update_conversation_title,
 )
-
 
 router = APIRouter()
 
