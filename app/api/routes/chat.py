@@ -44,6 +44,7 @@ def chat_message(
     current_user=Depends(get_current_user),
 ):
 
+
     conversation = (
         db.query(ChatConversation)
         .filter(
@@ -54,17 +55,36 @@ def chat_message(
     )
 
 
+    user_text = payload["message"]
+
+
     message = send_message(
         db,
         conversation,
-        payload["message"],
+        user_text,
     )
+
+
+    if conversation.title == "Nouvelle discussion":
+
+
+        title = user_text[:40]
+
+
+        if len(user_text) > 40:
+            title += "..."
+
+
+        update_conversation_title(
+            db,
+            conversation,
+            title
+        )
 
 
     return {
         "answer": message.content
     }
-
 
 from app.schemas.chat import ChatHistoryResponse
 
