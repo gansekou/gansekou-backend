@@ -316,3 +316,19 @@ def get_conversation_messages(
         .all()
 
     )
+
+
+def update_conversation_title(
+    db: Session,
+    conversation: ChatConversation,
+    title: str,
+):
+
+    conversation.title = title
+
+    db.commit()
+
+    db.refresh(conversation)
+
+    return conversation
+
