@@ -69,6 +69,36 @@ def chat_message(
 from app.schemas.chat import ChatHistoryResponse
 
 
+@router.get("/conversations")
+def list_conversations(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+
+    conversations = (
+        db.query(ChatConversation)
+        .filter(
+            ChatConversation.user_id == current_user.id
+        )
+        .order_by(
+            ChatConversation.last_message_at.desc()
+        )
+        .limit(20)
+        .all()
+    )
+
+    return [
+        {
+            "id": str(conversation.id),
+            "title": conversation.title,
+            "language": conversation.language,
+            "created_at": conversation.created_at,
+            "last_message_at": conversation.last_message_at,
+        }
+        for conversation in conversations
+    ]
+
+
 
 @router.get(
     "/{conversation_id}",
@@ -102,31 +132,3 @@ def get_chat_history(
     return conversation
 
 
-@router.get("/conversations")
-def list_conversations(
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
-):
-
-    conversations = (
-        db.query(ChatConversation)
-        .filter(
-            ChatConversation.user_id == current_user.id
-        )
-        .order_by(
-            ChatConversation.last_message_at.desc()
-        )
-        .limit(20)
-        .all()
-    )
-
-    return [
-        {
-            "id": str(conversation.id),
-            "title": conversation.title,
-            "language": conversation.language,
-            "created_at": conversation.created_at,
-            "last_message_at": conversation.last_message_at,
-        }
-        for conversation in conversations
-    ]
