@@ -37,6 +37,7 @@ from app.models.study_plan_item import StudyPlanItem
 from app.models.content_progress import ContentProgress
 from app.models.content_favorite import ContentFavorite
 from app.models.content_rating import ContentRating
+from app.models.content_relation import ContentRelation
 
 from app.models.subscription_plan import SubscriptionPlan
 from app.models.user_subscription import UserSubscription
@@ -44,3 +45,5 @@ from app.models.payment_transaction import PaymentTransaction
 
 from .chat_conversation import ChatConversation
 from .chat_message import ChatMessage
+
+
