@@ -20,6 +20,22 @@ class CRUDContent(CRUDBase[Content]):
             .all()
         )
 
+    def get_by_level_subject_and_type(
+        self,
+        db: Session,
+        level_id,
+        subject_id,
+        content_type
+    ):
+        return (
+            db.query(Content)
+            .filter(Content.level_id == level_id)
+            .filter(Content.subject_id == subject_id)
+            .filter(Content.content_type == content_type)
+            .filter(Content.status == "APPROVED")
+            .all()
+        )
+
     def get_approved(self, db: Session):
         return db.query(Content).filter(Content.status == "APPROVED").all()
 
