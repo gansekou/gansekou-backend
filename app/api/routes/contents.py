@@ -19,6 +19,10 @@ from app.core.content_access import (
     restrict_content_query_by_user,
 )
 from app.models.content_relation import ContentRelation
+from app.schemas.content_relation import (
+    ContentRelationCreate,
+    ContentRelationResponse,
+)
 from app.models.teacher_subject import TeacherSubject
 from app.services.teacher_xp_service import (
     XP_CONTENT_DOWNLOAD,
@@ -523,6 +527,117 @@ def like_content(
 
     return {"message": "Like enregistré"}
 
+@router.post(
+    "/{content_id}/relations",
+    response_model=ContentRelationResponse
+)
+def create_content_relation(
+    content_id: UUID,
+    payload: ContentRelationCreate,
+    db: Session = Depends(get_db),
+    current_user=Depends(
+        require_roles(CONTENT_CREATOR_ROLES)
+    ),
+):
+
+    parent_content = content.get(db, content_id)
+
+    if not parent_content:
+        raise HTTPException(
+            status_code=404,
+            detail="Contenu parent introuvable"
+        )
+
+
+    child_content = content.get(
+        db,
+        payload.child_content_id
+    )
+
+    if not child_content:
+        raise HTTPException(
+            status_code=404,
+            detail="Contenu enfant introuvable"
+        )
+
+
+    # Un enseignant ne peut lier que ses propres contenus
+    if current_user.role in TEACHER_CREATOR_ROLES:
+
+        if parent_content.author_id != current_user.id:
+            raise HTTPException(
+                status_code=403,
+                detail="Vous ne pouvez lier que vos propres contenus"
+            )
+
+
+    # éviter les doublons
+    existing = (
+        db.query(ContentRelation)
+        .filter(
+            ContentRelation.parent_content_id == content_id,
+            ContentRelation.child_content_id == payload.child_content_id,
+            ContentRelation.relation_type == payload.relation_type,
+        )
+        .first()
+    )
+
+
+    if existing:
+        raise HTTPException(
+            status_code=400,
+            detail="Cette relation existe déjà"
+        )
+
+
+    relation = ContentRelation(
+        parent_content_id=content_id,
+        child_content_id=payload.child_content_id,
+        relation_type=payload.relation_type,
+    )
+
+
+    db.add(relation)
+    db.commit()
+    db.refresh(relation)
+
+    return relation
+
+
+@router.delete(
+    "/relations/{relation_id}"
+)
+def delete_content_relation(
+    relation_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(
+        require_roles(CONTENT_CREATOR_ROLES)
+    ),
+):
+
+    relation = (
+        db.query(ContentRelation)
+        .filter(
+            ContentRelation.id == relation_id
+        )
+        .first()
+    )
+
+
+    if not relation:
+        raise HTTPException(
+            status_code=404,
+            detail="Relation introuvable"
+        )
+
+
+    db.delete(relation)
+    db.commit()
+
+
+    return {
+        "message": "Relation supprimée"
+    }
 
 
 @router.get("/{content_id}/analytics")
