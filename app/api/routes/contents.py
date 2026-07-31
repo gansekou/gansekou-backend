@@ -18,6 +18,7 @@ from app.core.content_access import (
     require_content_allowed_for_user,
     restrict_content_query_by_user,
 )
+from app.models.content_relation import ContentRelation
 from app.models.teacher_subject import TeacherSubject
 from app.services.teacher_xp_service import (
     XP_CONTENT_DOWNLOAD,
@@ -554,18 +555,48 @@ def get_related_contents(
     db_content = content.get(db, content_id)
 
     if not db_content:
-        raise HTTPException(404, "Contenu introuvable")
+        raise HTTPException(
+            status_code=404,
+            detail="Contenu introuvable"
+        )
 
     require_content_access(db, current_user, db_content)
+
+
+    related_ids = (
+        db.query(ContentRelation.child_content_id)
+        .filter(
+            ContentRelation.parent_content_id == content_id
+        )
+        .all()
+    )
+
+
+    ids = [
+        relation[0]
+        for relation in related_ids
+    ]
+
+
+    if not ids:
+        return []
+
 
     query = (
         db.query(content.model)
         .filter(
-            content.model.subject_id == db_content.subject_id,
-            content.model.id != db_content.id,
+            content.model.id.in_(ids),
             content.model.status == "APPROVED",
         )
     )
-    return restrict_public_content_query(query, db, current_user).limit(20).all()
 
 
+    return (
+        restrict_public_content_query(
+            query,
+            db,
+            current_user
+        )
+        .limit(20)
+        .all()
+    )
