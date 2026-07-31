@@ -11,17 +11,16 @@ class CRUDContent(CRUDBase[Content]):
     def create(self, db: Session, obj_in):
         obj_data = obj_in.model_dump(exclude_unset=True)
 
-        # On récupère les contenus liés
+        # Retirer les contenus liés avant de créer Content
         related_content_ids = obj_data.pop("related_content_ids", [])
 
-        # Création du contenu
-        db_obj = Content(**obj_data)
+        try:
+            # Création du contenu
+            db_obj = Content(**obj_data)
+            db.add(db_obj)
+            db.flush()  # génère db_obj.id
 
-        db.add(db_obj)
-        db.flush()  # permet d'obtenir db_obj.id sans commit
-
-        # Création des relations (facultatif)
-        if related_content_ids:
+            # Création des relations (facultatif)
             for related_id in related_content_ids:
                 db.add(
                     ContentRelation(
@@ -31,10 +30,14 @@ class CRUDContent(CRUDBase[Content]):
                     )
                 )
 
-        db.commit()
-        db.refresh(db_obj)
+            db.commit()
+            db.refresh(db_obj)
 
-        return db_obj
+            return db_obj
+
+        except Exception:
+            db.rollback()
+            raise
 
     def get_by_level(self, db: Session, level_id):
         return db.query(Content).filter(Content.level_id == level_id).all()
