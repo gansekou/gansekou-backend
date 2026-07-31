@@ -13,6 +13,8 @@ class ContentCreate(BaseModel):
     specialty_id: UUID | None = None
 
     content_type: str
+
+    related_content_ids: list[UUID] = []
     file_url: str | None = None
     thumbnail_url: str | None = None
 
