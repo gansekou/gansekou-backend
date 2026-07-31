@@ -2,24 +2,40 @@ from sqlalchemy.orm import Session
 
 from app.crud.base import CRUDBase
 from app.models.content import Content
+from app.models.content_relation import ContentRelation
 from app.models.content_translation import ContentTranslation
 
 
 class CRUDContent(CRUDBase[Content]):
+
     def create(self, db: Session, obj_in):
         obj_data = obj_in.model_dump(exclude_unset=True)
 
-        # Ce champ n'est pas une colonne de la table Content
-        obj_data.pop("related_content_ids", None)
+        # On récupère les contenus liés
+        related_content_ids = obj_data.pop("related_content_ids", [])
 
+        # Création du contenu
         db_obj = Content(**obj_data)
 
         db.add(db_obj)
+        db.flush()  # permet d'obtenir db_obj.id sans commit
+
+        # Création des relations (facultatif)
+        if related_content_ids:
+            for related_id in related_content_ids:
+                db.add(
+                    ContentRelation(
+                        parent_content_id=db_obj.id,
+                        child_content_id=related_id,
+                        relation_type="HAS_EXERCISE",
+                    )
+                )
+
         db.commit()
         db.refresh(db_obj)
 
         return db_obj
-    
+
     def get_by_level(self, db: Session, level_id):
         return db.query(Content).filter(Content.level_id == level_id).all()
 
@@ -39,7 +55,7 @@ class CRUDContent(CRUDBase[Content]):
         db: Session,
         level_id,
         subject_id,
-        content_type
+        content_type,
     ):
         return (
             db.query(Content)
@@ -54,12 +70,21 @@ class CRUDContent(CRUDBase[Content]):
         return db.query(Content).filter(Content.status == "APPROVED").all()
 
     def get_offline_available(self, db: Session):
-        return db.query(Content).filter(Content.is_available_offline == True).all()
+        return (
+            db.query(Content)
+            .filter(Content.is_available_offline == True)
+            .all()
+        )
 
 
 class CRUDContentTranslation(CRUDBase[ContentTranslation]):
+
     def get_by_content(self, db: Session, content_id):
-        return db.query(ContentTranslation).filter(ContentTranslation.content_id == content_id).all()
+        return (
+            db.query(ContentTranslation)
+            .filter(ContentTranslation.content_id == content_id)
+            .all()
+        )
 
     def get_by_content_and_language(self, db: Session, content_id, language: str):
         return (
