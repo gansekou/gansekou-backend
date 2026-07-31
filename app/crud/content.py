@@ -6,6 +6,20 @@ from app.models.content_translation import ContentTranslation
 
 
 class CRUDContent(CRUDBase[Content]):
+    def create(self, db: Session, obj_in):
+        obj_data = obj_in.model_dump(exclude_unset=True)
+
+        # Ce champ n'est pas une colonne de la table Content
+        obj_data.pop("related_content_ids", None)
+
+        db_obj = Content(**obj_data)
+
+        db.add(db_obj)
+        db.commit()
+        db.refresh(db_obj)
+
+        return db_obj
+    
     def get_by_level(self, db: Session, level_id):
         return db.query(Content).filter(Content.level_id == level_id).all()
 
