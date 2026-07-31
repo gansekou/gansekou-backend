@@ -13,7 +13,7 @@ from sqlalchemy.sql import func
 from sqlalchemy.dialects.postgresql import UUID
 
 from app.database.base import Base
-
+from app.models.content_relation import ContentRelation
 
 class Content(Base):
     __tablename__ = "contents"
@@ -189,3 +189,21 @@ class Content(Base):
     level = relationship("Level")
 
     specialty = relationship("Specialty")
+
+    # ------------------------------------------------------------------
+    # Relations pédagogiques entre contenus
+    # ------------------------------------------------------------------
+
+    child_relations = relationship(
+        "ContentRelation",
+        foreign_keys="ContentRelation.parent_content_id",
+        back_populates="parent_content",
+        cascade="all, delete-orphan",
+    )
+
+    parent_relations = relationship(
+        "ContentRelation",
+        foreign_keys="ContentRelation.child_content_id",
+        back_populates="child_content",
+        cascade="all, delete-orphan",
+    )
