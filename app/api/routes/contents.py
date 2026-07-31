@@ -106,6 +106,69 @@ def get_contents(
 ):
     return content.get_all(db, skip=skip, limit=limit)
 
+@router.get("/related-options", response_model=list[ContentResponse])
+def get_related_options(
+    level_id: UUID,
+    subject_id: UUID,
+    target_type: str,
+    exclude_id: UUID | None = None,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+
+    query = (
+        db.query(content.model)
+        .filter(
+            content.model.level_id == level_id,
+            content.model.subject_id == subject_id,
+            content.model.status == "APPROVED",
+        )
+    )
+
+
+    if exclude_id:
+        query = query.filter(
+            content.model.id != exclude_id
+        )
+
+
+    current_type = normalize_content_type(target_type)
+
+
+    if current_type == "COURS":
+
+        query = query.filter(
+            content.model.content_type.in_(
+                [
+                    "EXERCICE",
+                    "SUJET",
+                ]
+            )
+        )
+
+
+    elif current_type == "EXERCICE":
+
+        query = query.filter(
+            content.model.content_type == "COURS"
+        )
+
+
+    elif current_type == "SUJET":
+
+        query = query.filter(
+            content.model.content_type == "COURS"
+        )
+
+
+    return (
+        query
+        .order_by(
+            content.model.created_at.desc()
+        )
+        .all()
+    )
+
 
 @router.get("/approved", response_model=list[ContentResponse])
 def get_approved_contents(
@@ -233,76 +296,6 @@ def get_content_translations(
 
     return content_translation.get_by_content(db, content_id)
 
-
-@router.get("/related-options", response_model=list[ContentResponse])
-def get_related_options(
-    level_id: UUID,
-    subject_id: UUID,
-    target_type: str,
-    exclude_id: UUID | None = None,
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
-):
-
-    query = (
-        db.query(content.model)
-        .filter(
-            content.model.level_id == level_id,
-            content.model.subject_id == subject_id,
-            content.model.status == "APPROVED",
-        )
-    )
-
-
-    # Ne pas proposer le contenu en cours de modification
-    if exclude_id:
-        query = query.filter(
-            content.model.id != exclude_id
-        )
-
-
-    current_type = normalize_content_type(target_type)
-
-
-    # Création d'un COURS :
-    # proposer EXERCICE et SUJET
-    if current_type == "COURS":
-
-        query = query.filter(
-            content.model.content_type.in_(
-                [
-                    "EXERCICE",
-                    "SUJET",
-                ]
-            )
-        )
-
-
-    # Création d'un EXERCICE :
-    # proposer le COURS correspondant
-    elif current_type == "EXERCICE":
-
-        query = query.filter(
-            content.model.content_type == "COURS"
-        )
-
-
-    # Création d'un SUJET :
-    # proposer le COURS correspondant
-    elif current_type == "SUJET":
-
-        query = query.filter(
-            content.model.content_type == "COURS"
-        )
-
-
-    return (
-        query
-        .order_by(
-            content.model.created_at.desc()
-        )
-        .all()
-    )
 
 @router.get("/{content_id}", response_model=ContentResponse)
 def get_content(
