@@ -40,6 +40,8 @@ class ContentResponse(ORMBaseSchema):
 
     title: str | None = None
 
+    translations: list[ContentTranslationResponse] = []
+
     content_type: str
     file_url: str | None
     thumbnail_url: str | None
