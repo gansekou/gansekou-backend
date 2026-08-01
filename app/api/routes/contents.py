@@ -169,6 +169,7 @@ def get_related_options(
         )
         .filter(ContentTranslation.language == "fr")
         .add_columns(ContentTranslation.title)
+        .add_columns(ContentTranslation.description)
         .order_by(content.model.created_at.desc())
         .all()
     )
