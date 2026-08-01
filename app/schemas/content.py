@@ -39,7 +39,6 @@ class ContentResponse(ORMBaseSchema):
     specialty_id: UUID | None
 
     title: str | None = None
-    description: str | None = None
 
     content_type: str
     file_url: str | None
