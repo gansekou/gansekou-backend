@@ -112,108 +112,33 @@ def get_contents(
 def get_related_options(
     level_id: UUID,
     subject_id: UUID,
-    target_type: str,
     exclude_id: UUID | None = None,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
+    """
+    Retourne tous les contenus du même niveau et de la même matière.
+    """
 
     query = (
         db.query(content.model)
-        .options(
-            selectinload(content.model.translations)
-        )
         .filter(
             content.model.level_id == level_id,
             content.model.subject_id == subject_id,
             content.model.status == "APPROVED",
         )
+        .order_by(content.model.created_at.desc())
     )
 
-
+    # Exclure le contenu actuel si fourni
     if exclude_id:
         query = query.filter(
             content.model.id != exclude_id
         )
 
+    results = query.limit(50).all()
 
-    current_type = normalize_content_type(target_type)
-
-
-    if current_type == "COURS":
-
-        query = query.filter(
-            content.model.content_type.in_(
-                [
-                    "EXERCICE",
-                    "SUJET",
-                ]
-            )
-        )
-
-
-    elif current_type == "EXERCICE":
-
-        query = query.filter(
-            content.model.content_type == "COURS"
-        )
-
-
-    elif current_type == "SUJET":
-
-        query = query.filter(
-            content.model.content_type == "COURS"
-        )
-
-
-    results = (
-        query.join(
-            ContentTranslation,
-            ContentTranslation.content_id == content.model.id,
-        )
-        .filter(ContentTranslation.language == "fr")
-        .add_columns(ContentTranslation.title)
-        .order_by(content.model.created_at.desc())
-        .all()
-    )
-
-    print("LEVEL =", level_id)
-    print("SUBJECT =", subject_id)
-    print("TARGET =", target_type)
-    
-    print(query)
-    
-    print(query.count())
-    
-    for c in query.all():
-        print(
-            c.id,
-            c.content_type,
-            c.level_id,
-            c.subject_id,
-            c.status
-        )
-    
-    return [
-        {
-            "id": c.id,
-            "author_id": c.author_id,
-            "subject_id": c.subject_id,
-            "level_id": c.level_id,
-            "specialty_id": c.specialty_id,
-            "content_type": c.content_type,
-            "file_url": c.file_url,
-            "thumbnail_url": c.thumbnail_url,
-            "status": c.status,
-            "is_premium": c.is_premium,
-            "is_available_offline": c.is_available_offline,
-            "version": c.version,
-            "created_at": c.created_at,
-            "updated_at": c.updated_at,
-            "title": title,
-        }
-        for c, title in results
-    ]
+    return results
 
 
 @router.get("/approved", response_model=list[ContentResponse])
