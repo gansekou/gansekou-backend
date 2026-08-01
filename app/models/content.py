@@ -14,6 +14,7 @@ from sqlalchemy.dialects.postgresql import UUID
 
 from app.database.base import Base
 from app.models.content_relation import ContentRelation
+from app.models.content_translation import ContentTranslation
 
 class Content(Base):
     __tablename__ = "contents"
@@ -189,6 +190,12 @@ class Content(Base):
     level = relationship("Level")
 
     specialty = relationship("Specialty")
+
+    translations = relationship(
+        "ContentTranslation",
+        back_populates="content",
+        cascade="all, delete-orphan",
+    )
 
     # ------------------------------------------------------------------
     # Relations pédagogiques entre contenus
