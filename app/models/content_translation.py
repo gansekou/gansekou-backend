@@ -76,4 +76,7 @@ class ContentTranslation(Base):
         onupdate=func.now()
     )
 
-    content = relationship("Content")
+    content = relationship(
+        "Content",
+        back_populates="translations",
+    )
