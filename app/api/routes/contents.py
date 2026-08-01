@@ -2,6 +2,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
+from sqlalchemy.orm import selectinload
 
 from app.database.session import get_db
 from app.schemas.content import ContentCreate, ContentResponse
@@ -119,6 +120,9 @@ def get_related_options(
 
     query = (
         db.query(content.model)
+        .options(
+            selectinload(content.model.translations)
+        )
         .filter(
             content.model.level_id == level_id,
             content.model.subject_id == subject_id,
