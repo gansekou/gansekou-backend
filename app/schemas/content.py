@@ -4,6 +4,8 @@ from pydantic import BaseModel, field_validator
 
 from app.schemas.common import ORMBaseSchema
 from app.core.content_access import normalize_content_type
+from typing import List
+from app.schemas.content_translation import ContentTranslationResponse
 
 
 class ContentCreate(BaseModel):
@@ -54,3 +56,5 @@ class ContentResponse(ORMBaseSchema):
 
     created_at: datetime
     updated_at: datetime
+
+ContentResponse.model_rebuild()
