@@ -176,6 +176,23 @@ def get_related_options(
         .order_by(content.model.created_at.desc())
         .all()
     )
+
+    print("LEVEL =", level_id)
+    print("SUBJECT =", subject_id)
+    print("TARGET =", target_type)
+    
+    print(query)
+    
+    print(query.count())
+    
+    for c in query.all():
+        print(
+            c.id,
+            c.content_type,
+            c.level_id,
+            c.subject_id,
+            c.status
+        )
     
     return [
         {
