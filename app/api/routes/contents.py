@@ -7,7 +7,7 @@ from sqlalchemy.orm import selectinload
 from app.database.session import get_db
 from app.schemas.content import ContentCreate, ContentResponse
 from app.schemas.content_translation import (
-    ContentTranslationCreate,
+    ContentTranslationCreate, 
     ContentTranslationResponse,
 )
 from app.crud.content import content, content_translation
