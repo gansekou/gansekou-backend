@@ -73,7 +73,10 @@ def firebase_login(payload: FirebaseLoginRequest, db: Session = Depends(get_db))
     if existing_user:
         refresh_token = create_device_session(
             db,
-            existing_user.id
+            existing_user.id,
+            device_id=payload.device_id or "unknown",
+            device_name=payload.device_name,
+            platform=payload.platform,
         )
         
         return {
@@ -95,7 +98,10 @@ def firebase_login(payload: FirebaseLoginRequest, db: Session = Depends(get_db))
     
         refresh_token = create_device_session(
             db,
-            existing_email.id
+            existing_email.id,
+            device_id=payload.device_id or "unknown",
+            device_name=payload.device_name,
+            platform=payload.platform,
         )
     
         return {
@@ -139,7 +145,10 @@ def firebase_login(payload: FirebaseLoginRequest, db: Session = Depends(get_db))
     
     refresh_token = create_device_session(
         db,
-        new_user.id
+        new_user.id,
+        device_id=payload.device_id or "unknown",
+        device_name=payload.device_name,
+        platform=payload.platform,
     )
     
     
@@ -187,7 +196,10 @@ def register_email(payload: EmailRegisterRequest, db: Session = Depends(get_db))
 
     refresh_token = create_device_session(
         db,
-        new_user.id
+        new_user.id,
+        device_id=payload.device_id or "unknown",
+        device_name=payload.device_name,
+        platform=payload.platform,
     )
     
     return {
