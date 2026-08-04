@@ -4,8 +4,13 @@ from app.schemas.user import UserResponse
 
 class FirebaseLoginRequest(BaseModel):
     id_token: str
+
     preferred_language: str = "FR"
     role: str = "ELEVE"
+
+    device_id: str | None = None
+    device_name: str | None = None
+    platform: str = "web"
 
 
 class EmailRegisterRequest(BaseModel):
@@ -22,6 +27,10 @@ class EmailRegisterRequest(BaseModel):
 
     preferred_language: str = "FR"
     role: str = "ELEVE"
+
+    device_id: str | None = None
+    device_name: str | None = None
+    platform: str = "web"
 
 
 class AuthResponse(BaseModel):
