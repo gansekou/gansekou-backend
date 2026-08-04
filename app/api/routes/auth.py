@@ -86,14 +86,23 @@ def firebase_login(payload: FirebaseLoginRequest, db: Session = Depends(get_db))
     existing_email = user.get_by_email(db, email) if email else None
     if existing_email:
         existing_email.firebase_uid = firebase_uid
+    
         if picture and not existing_email.profile_url:
             existing_email.profile_url = picture
+    
         db.commit()
         db.refresh(existing_email)
+    
+        refresh_token = create_device_session(
+            db,
+            existing_email.id
+        )
+    
         return {
             "access_type": "firebase",
             "is_new_user": False,
             "user": existing_email,
+            "refresh_token": refresh_token,
         }
 
     social_providers = ["google.com", "facebook.com", "password"]
@@ -126,11 +135,19 @@ def firebase_login(payload: FirebaseLoginRequest, db: Session = Depends(get_db))
         new_user.profile_url = picture
         db.commit()
         db.refresh(new_user)
-
+    
+    
+    refresh_token = create_device_session(
+        db,
+        new_user.id
+    )
+    
+    
     return {
         "access_type": "firebase",
         "is_new_user": True,
         "user": new_user,
+        "refresh_token": refresh_token,
     }
 
 
@@ -168,8 +185,14 @@ def register_email(payload: EmailRegisterRequest, db: Session = Depends(get_db))
 
     new_user = user.create_user(db, new_user_data)
 
+    refresh_token = create_device_session(
+        db,
+        new_user.id
+    )
+    
     return {
         "access_type": "firebase",
         "is_new_user": True,
         "user": new_user,
+        "refresh_token": refresh_token,
     }
