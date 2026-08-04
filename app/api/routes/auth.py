@@ -6,10 +6,40 @@ from app.services.firebase_service import verify_firebase_token
 from app.schemas.auth import FirebaseLoginRequest, EmailRegisterRequest, AuthResponse
 from app.schemas.user import UserCreate
 from app.crud.user import user
+from app.models.device_session import DeviceSession
+from app.services.session_service import (
+    create_refresh_token,
+    hash_token,
+    get_session_expiration,
+)
 
 router = APIRouter()
 
 SELF_REGISTER_ROLES = {"ELEVE"}
+
+def create_device_session(
+    db: Session,
+    user_id,
+    device_id: str = "web",
+    device_name: str | None = None,
+    platform: str = "web",
+):
+    refresh_token = create_refresh_token()
+
+    session = DeviceSession(
+        user_id=user_id,
+        device_id=device_id,
+        device_name=device_name,
+        platform=platform,
+        refresh_token_hash=hash_token(refresh_token),
+        expires_at=get_session_expiration(30),
+    )
+
+    db.add(session)
+    db.commit()
+    db.refresh(session)
+
+    return refresh_token
 
 
 def validate_self_register_role(role: str):
@@ -41,10 +71,16 @@ def firebase_login(payload: FirebaseLoginRequest, db: Session = Depends(get_db))
     existing_user = user.get_by_firebase_uid(db, firebase_uid)
 
     if existing_user:
+        refresh_token = create_device_session(
+            db,
+            existing_user.id
+        )
+        
         return {
             "access_type": "firebase",
             "is_new_user": False,
             "user": existing_user,
+            "refresh_token": refresh_token,
         }
 
     existing_email = user.get_by_email(db, email) if email else None
