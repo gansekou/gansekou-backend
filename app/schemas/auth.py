@@ -28,3 +28,5 @@ class AuthResponse(BaseModel):
     access_type: str = "firebase"
     is_new_user: bool
     user: UserResponse
+
+    refresh_token: str | None = None
