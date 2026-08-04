@@ -34,17 +34,40 @@ def create_device_session(
 ):
     refresh_token = create_refresh_token()
 
-    session = DeviceSession(
-        user_id=user_id,
-        device_id=device_id,
-        device_name=device_name,
-        platform=platform,
-        refresh_token_hash=hash_token(refresh_token),
-        expires_at=get_session_expiration(30),
-        last_activity=datetime.now(timezone.utc),
+    # Rechercher une session existante pour cet utilisateur et cet appareil
+    session = (
+        db.query(DeviceSession)
+        .filter(
+            DeviceSession.user_id == user_id,
+            DeviceSession.device_id == device_id,
+        )
+        .first()
     )
 
-    db.add(session)
+    if session:
+        # Mise à jour de la session existante
+        session.device_name = device_name
+        session.platform = platform
+        session.refresh_token_hash = hash_token(refresh_token)
+        session.last_activity = datetime.now(timezone.utc)
+        session.expires_at = get_session_expiration(30)
+        session.revoked = False
+
+    else:
+        # Création d'une nouvelle session
+        session = DeviceSession(
+            user_id=user_id,
+            device_id=device_id,
+            device_name=device_name,
+            platform=platform,
+            refresh_token_hash=hash_token(refresh_token),
+            expires_at=get_session_expiration(30),
+            last_activity=datetime.now(timezone.utc),
+            revoked=False,
+        )
+
+        db.add(session)
+
     db.commit()
     db.refresh(session)
 
@@ -271,6 +294,7 @@ def refresh_session(
     session.refresh_token_hash = hash_token(
         new_refresh_token
     )
+    session.expires_at = get_session_expiration(30)
 
     session.last_activity = datetime.now(timezone.utc)
 
