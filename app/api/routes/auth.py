@@ -3,7 +3,15 @@ from sqlalchemy.orm import Session
 
 from app.database.session import get_db
 from app.services.firebase_service import verify_firebase_token
-from app.schemas.auth import FirebaseLoginRequest, EmailRegisterRequest, AuthResponse
+from app.schemas.auth import (
+    FirebaseLoginRequest,
+    EmailRegisterRequest,
+    AuthResponse,
+    RefreshTokenRequest,
+    RefreshTokenResponse,
+)
+
+from datetime import datetime, timezone
 from app.schemas.user import UserCreate
 from app.crud.user import user
 from app.models.device_session import DeviceSession
@@ -41,6 +49,20 @@ def create_device_session(
 
     return refresh_token
 
+def get_device_session_by_token(
+    db: Session,
+    refresh_token: str,
+):
+    token_hash = hash_token(refresh_token)
+
+    return (
+        db.query(DeviceSession)
+        .filter(
+            DeviceSession.refresh_token_hash == token_hash,
+            DeviceSession.revoked == False,
+        )
+        .first()
+    )
 
 def validate_self_register_role(role: str):
     normalized_role = role.strip().upper()
@@ -207,4 +229,68 @@ def register_email(payload: EmailRegisterRequest, db: Session = Depends(get_db))
         "is_new_user": True,
         "user": new_user,
         "refresh_token": refresh_token,
+    }
+
+
+@router.post(
+    "/refresh",
+    response_model=RefreshTokenResponse
+)
+def refresh_session(
+    payload: RefreshTokenRequest,
+    db: Session = Depends(get_db),
+):
+
+    session = get_device_session_by_token(
+        db,
+        payload.refresh_token
+    )
+
+    if not session:
+        raise HTTPException(
+            status_code=401,
+            detail="Session invalide ou expirée"
+        )
+
+
+    if session.expires_at:
+        if session.expires_at < datetime.now(timezone.utc):
+            session.revoked = True
+            db.commit()
+
+            raise HTTPException(
+                status_code=401,
+                detail="Session expirée"
+            )
+
+
+    # rotation du token
+    new_refresh_token = create_refresh_token()
+
+    session.refresh_token_hash = hash_token(
+        new_refresh_token
+    )
+
+    session.last_activity = datetime.now(timezone.utc)
+
+    db.commit()
+
+
+    current_user = user.get(
+        db,
+        session.user_id
+    )
+
+
+    if not current_user:
+        raise HTTPException(
+            status_code=404,
+            detail="Utilisateur introuvable"
+        )
+
+
+    return {
+        "access_type": "firebase",
+        "user": current_user,
+        "refresh_token": new_refresh_token,
     }
