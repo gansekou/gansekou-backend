@@ -39,3 +39,12 @@ class AuthResponse(BaseModel):
     user: UserResponse
 
     refresh_token: str | None = None
+
+class RefreshTokenRequest(BaseModel):
+    refresh_token: str
+
+
+class RefreshTokenResponse(BaseModel):
+    access_type: str = "firebase"
+    user: UserResponse
+    refresh_token: str
