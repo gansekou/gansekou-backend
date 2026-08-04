@@ -41,6 +41,7 @@ def create_device_session(
         platform=platform,
         refresh_token_hash=hash_token(refresh_token),
         expires_at=get_session_expiration(30),
+        last_activity=datetime.now(timezone.utc),
     )
 
     db.add(session)
