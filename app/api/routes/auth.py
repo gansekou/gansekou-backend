@@ -295,3 +295,22 @@ def refresh_session(
         "user": current_user,
         "refresh_token": new_refresh_token,
     }
+
+@router.post("/logout")
+def logout(
+    payload: RefreshTokenRequest,
+    db: Session = Depends(get_db),
+):
+
+    session = get_device_session_by_token(
+        db,
+        payload.refresh_token
+    )
+
+    if session:
+        session.revoked = True
+        db.commit()
+
+    return {
+        "message": "Déconnexion réussie"
+    }
