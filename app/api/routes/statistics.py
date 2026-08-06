@@ -8,6 +8,7 @@ from app.core.security import get_current_user
 from app.database.session import get_db
 from app.models.ai_answer import AIAnswer
 from app.models.content import Content
+from app.models.content_translation import ContentTranslation
 from app.models.content_progress import ContentProgress
 from app.models.level import Level
 from app.models.payment_transaction import PaymentTransaction
@@ -20,6 +21,7 @@ from app.models.teacher_answer import TeacherAnswer
 from app.models.teacher_subject import TeacherSubject
 from app.models.user import User
 from app.services.gamification_service import get_or_create_profile, level_label
+
 
 router = APIRouter()
 
@@ -137,7 +139,17 @@ def admin_overview(
         .all()
     )
     top_contents = (
-        db.query(Content.id, Content.title, Content.total_views, Content.total_downloads)
+        db.query(
+            Content.id,
+            ContentTranslation.title.label("title"),
+            Content.total_views,
+            Content.total_downloads,
+        )
+        .join(
+            ContentTranslation,
+            ContentTranslation.content_id == Content.id,
+        )
+        .filter(ContentTranslation.language == "FR")
         .order_by(Content.total_views.desc())
         .limit(8)
         .all()
