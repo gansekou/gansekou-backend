@@ -8,28 +8,37 @@ from app.core.config import settings
 
 
 class MonetbilService:
+    """
+    Service d'intégration avec l'API Monetbil Payment v1.
+
+    Documentation :
+    POST /payment/v1/placePayment
+    POST /payment/v1/checkPayment
+    """
+
     BASE_URL = "https://api.monetbil.com/payment/v1"
 
     def __init__(self) -> None:
         self.service_key = settings.MONETBIL_SERVICE_KEY
 
-    async def place_payment(
+    async def create_payment(
         self,
         *,
         amount: int,
-        phonenumber: str,
         payment_ref: str,
-        item_ref: str,
         user: str,
+        item_ref: str,
+        phone: str,
         first_name: str | None = None,
         last_name: str | None = None,
         email: str | None = None,
-        operator: str | None = None,
+        return_url: str | None = None,
         notify_url: str | None = None,
+        operator: str | None = None,
     ) -> dict[str, Any]:
 
         # --------------------------------------------------
-        # Validation configuration
+        # Validation
         # --------------------------------------------------
 
         if not self.service_key:
@@ -38,21 +47,13 @@ class MonetbilService:
                 "error": "MONETBIL_SERVICE_KEY non configurée",
             }
 
-        # --------------------------------------------------
-        # Validation montant
-        # --------------------------------------------------
-
         if amount <= 0:
             return {
                 "success": False,
                 "error": "Le montant doit être supérieur à zéro",
             }
 
-        # --------------------------------------------------
-        # Validation téléphone
-        # --------------------------------------------------
-
-        if not phonenumber:
+        if not phone:
             return {
                 "success": False,
                 "error": "Le numéro de téléphone est obligatoire",
@@ -64,23 +65,20 @@ class MonetbilService:
 
         payload: dict[str, Any] = {
             "service": self.service_key,
-            "phonenumber": phonenumber,
+            "phonenumber": phone,
             "amount": str(amount),
-            "currency": "XAF",
             "country": "CM",
+            "currency": "XAF",
             "payment_ref": payment_ref,
             "item_ref": item_ref,
+            "user": user,
         }
 
-        # --------------------------------------------------
-        # Champs optionnels
-        # --------------------------------------------------
+        if notify_url:
+            payload["notify_url"] = notify_url
 
         if operator:
             payload["operator"] = operator
-
-        if user:
-            payload["user"] = user
 
         if first_name:
             payload["first_name"] = first_name
@@ -91,17 +89,13 @@ class MonetbilService:
         if email:
             payload["email"] = email
 
-        if notify_url:
-            payload["notify_url"] = notify_url
-
         # --------------------------------------------------
-        # Appel API
+        # Appel Monetbil
         # --------------------------------------------------
 
         url = f"{self.BASE_URL}/placePayment"
 
         try:
-
             async with httpx.AsyncClient(
                 timeout=30.0
             ) as client:
@@ -123,11 +117,12 @@ class MonetbilService:
                 data = response.json()
 
             except Exception:
-
                 return {
                     "success": False,
                     "status_code": response.status_code,
-                    "error": "Réponse Monetbil non JSON",
+                    "error": (
+                        "Réponse Monetbil non JSON"
+                    ),
                     "raw_response": response.text,
                 }
 
@@ -136,7 +131,6 @@ class MonetbilService:
             # --------------------------------------------------
 
             if response.status_code >= 400:
-
                 return {
                     "success": False,
                     "status_code": response.status_code,
@@ -144,23 +138,19 @@ class MonetbilService:
                 }
 
             # --------------------------------------------------
-            # Monetbil status
+            # Statut Monetbil
             # --------------------------------------------------
 
-            status = str(
+            monetbil_status = str(
                 data.get("status", "")
             ).upper()
 
-            if status != "REQUEST_ACCEPTED":
+            if monetbil_status != "REQUEST_ACCEPTED":
 
                 return {
                     "success": False,
                     "status_code": response.status_code,
                     "response": data,
-                    "error": data.get(
-                        "message",
-                        "Monetbil a refusé la demande de paiement",
-                    ),
                 }
 
             # --------------------------------------------------
@@ -173,21 +163,30 @@ class MonetbilService:
 
                 return {
                     "success": False,
-                    "response": data,
+                    "status_code": response.status_code,
                     "error": (
-                        "Monetbil a accepté la demande "
+                        "Monetbil a accepté la requête "
                         "mais aucun paymentId n'a été retourné"
                     ),
+                    "response": data,
                 }
+
+            # --------------------------------------------------
+            # Succès initial
+            # --------------------------------------------------
 
             return {
                 "success": True,
                 "payment_id": str(payment_id),
-                "status": status,
+                "status": data.get("status"),
                 "message": data.get("message"),
                 "channel": data.get("channel"),
-                "channel_name": data.get("channel_name"),
-                "channel_ussd": data.get("channel_ussd"),
+                "channel_name": data.get(
+                    "channel_name"
+                ),
+                "channel_ussd": data.get(
+                    "channel_ussd"
+                ),
                 "data": data,
             }
 
@@ -196,7 +195,8 @@ class MonetbilService:
             return {
                 "success": False,
                 "error": (
-                    "Délai dépassé lors de la connexion à Monetbil"
+                    "Délai dépassé lors de la "
+                    "connexion à Monetbil"
                 ),
             }
 
@@ -218,12 +218,17 @@ class MonetbilService:
                 ),
             }
 
-
     async def check_payment(
         self,
         *,
         payment_id: str,
     ) -> dict[str, Any]:
+
+        if not self.service_key:
+            return {
+                "success": False,
+                "error": "MONETBIL_SERVICE_KEY non configurée",
+            }
 
         if not payment_id:
             return {
@@ -231,14 +236,13 @@ class MonetbilService:
                 "error": "paymentId manquant",
             }
 
-        url = f"{self.BASE_URL}/checkPayment"
-
         payload = {
             "paymentId": payment_id,
         }
 
-        try:
+        url = f"{self.BASE_URL}/checkPayment"
 
+        try:
             async with httpx.AsyncClient(
                 timeout=30.0
             ) as client:
@@ -255,11 +259,12 @@ class MonetbilService:
                 data = response.json()
 
             except Exception:
-
                 return {
                     "success": False,
                     "status_code": response.status_code,
-                    "error": "Réponse Monetbil non JSON",
+                    "error": (
+                        "Réponse Monetbil non JSON"
+                    ),
                     "raw_response": response.text,
                 }
 
@@ -271,29 +276,32 @@ class MonetbilService:
                     "response": data,
                 }
 
-            transaction = data.get("transaction")
+            transaction = data.get(
+                "transaction"
+            )
 
-            if transaction:
+            if not transaction:
 
-                monetbil_status = transaction.get(
-                    "status"
-                )
+                return {
+                    "success": True,
+                    "payment_id": payment_id,
+                    "message": data.get("message"),
+                    "transaction": None,
+                    "data": data,
+                }
 
-            else:
-
-                monetbil_status = None
+            monetbil_status = transaction.get(
+                "status"
+            )
 
             return {
                 "success": True,
-                "payment_id": str(
-                    data.get(
-                        "paymentId",
-                        payment_id,
-                    )
+                "payment_id": payment_id,
+                "status": monetbil_status,
+                "message": transaction.get(
+                    "message"
                 ),
-                "message": data.get("message"),
                 "transaction": transaction,
-                "monetbil_status": monetbil_status,
                 "data": data,
             }
 
@@ -302,8 +310,8 @@ class MonetbilService:
             return {
                 "success": False,
                 "error": (
-                    "Délai dépassé lors de la vérification "
-                    "du paiement Monetbil"
+                    "Délai dépassé lors de la "
+                    "connexion à Monetbil"
                 ),
             }
 
