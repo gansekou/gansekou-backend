@@ -1,7 +1,8 @@
 import uuid
 from datetime import datetime, timezone, timedelta
+from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Header, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -13,20 +14,34 @@ from app.models.user import User
 from app.models.subscription_plan import SubscriptionPlan
 from app.models.user_subscription import UserSubscription
 from app.models.payment_transaction import PaymentTransaction
-from app.services.campay_service import campay_service
+
+from app.services.monetbil_service import monetbil_service
+
 
 router = APIRouter()
 
 
+# ============================================================
+# REQUEST SCHEMAS
+# ============================================================
+
 class PaymentInitRequest(BaseModel):
     plan_id: uuid.UUID
-    phone_number: str
-    payment_method: str  # MTN / ORANGE
+    phone_number: str | None = None
 
 
-def normalize_period(period: str | None, duration_days: int) -> str:
+# ============================================================
+# HELPERS
+# ============================================================
+
+def normalize_period(
+    period: str | None,
+    duration_days: int,
+) -> str:
+
     if period:
         normalized = period.lower()
+
         if normalized in ["month", "year"]:
             return normalized
 
@@ -36,34 +51,44 @@ def normalize_period(period: str | None, duration_days: int) -> str:
     return "month"
 
 
-def normalize_payment_status(status: str | None) -> str:
+def normalize_payment_status(
+    status: str | None,
+) -> str:
+
     if not status:
         return "PENDING"
 
-    status = status.upper()
+    normalized = str(status).upper().strip()
 
-    if status in ["SUCCESSFUL", "SUCCESS", "COMPLETED"]:
+    if normalized in [
+        "SUCCESS",
+        "SUCCESSFUL",
+        "COMPLETED",
+    ]:
         return "SUCCESS"
 
-    if status in ["FAILED", "CANCELLED", "CANCELED"]:
+    if normalized in [
+        "FAILED",
+        "CANCELLED",
+        "CANCELED",
+    ]:
         return "FAILED"
 
     return "PENDING"
 
 
-def is_valid_webhook_secret(webhook_key: str | None, signature: str | None) -> bool:
-    expected = settings.CAMPAY_WEBHOOK_KEY
+# ============================================================
+# SUBSCRIPTION
+# ============================================================
 
-    if not expected:
-        return False
-
-    return webhook_key == expected or signature == expected
-
-
-def activate_subscription(db: Session, user_id, plan: SubscriptionPlan):
+def activate_subscription(
+    db: Session,
+    user_id,
+    plan: SubscriptionPlan,
+):
     now = datetime.now(timezone.utc)
 
-    old_subs = (
+    old_subscriptions = (
         db.query(UserSubscription)
         .filter(
             UserSubscription.user_id == user_id,
@@ -72,15 +97,17 @@ def activate_subscription(db: Session, user_id, plan: SubscriptionPlan):
         .all()
     )
 
-    for sub in old_subs:
-        sub.status = "EXPIRED"
+    for subscription in old_subscriptions:
+        subscription.status = "EXPIRED"
 
     subscription = UserSubscription(
         user_id=user_id,
         plan_id=plan.id,
         status="ACTIVE",
         starts_at=now,
-        expires_at=now + timedelta(days=plan.duration_days),
+        expires_at=now + timedelta(
+            days=plan.duration_days
+        ),
     )
 
     db.add(subscription)
@@ -90,15 +117,31 @@ def activate_subscription(db: Session, user_id, plan: SubscriptionPlan):
     return subscription
 
 
-def activate_subscription_once(db: Session, transaction: PaymentTransaction, plan: SubscriptionPlan):
+def activate_subscription_once(
+    db: Session,
+    transaction: PaymentTransaction,
+    plan: SubscriptionPlan,
+):
     if transaction.status == "SUCCESS":
         return None
 
     transaction.status = "SUCCESS"
-    return activate_subscription(db, transaction.user_id, plan)
+
+    return activate_subscription(
+        db,
+        transaction.user_id,
+        plan,
+    )
 
 
-def ensure_default_subscription_plans(db: Session):
+# ============================================================
+# DEFAULT PLANS
+# ============================================================
+
+def ensure_default_subscription_plans(
+    db: Session,
+):
+
     defaults = [
         {
             "code": "EXCELLENCE_MONTH",
@@ -106,7 +149,10 @@ def ensure_default_subscription_plans(db: Session):
             "price_xaf": 500,
             "duration_days": 30,
             "period": "month",
-            "description": "La formule ideale pour progresser chaque mois sans limitation.",
+            "description": (
+                "La formule idéale pour progresser "
+                "chaque mois sans limitation."
+            ),
         },
         {
             "code": "EXCELLENCE_YEAR",
@@ -114,17 +160,24 @@ def ensure_default_subscription_plans(db: Session):
             "price_xaf": 4500,
             "duration_days": 365,
             "period": "year",
-            "description": "La formule annuelle pour les eleves ambitieux.",
+            "description": (
+                "La formule annuelle pour les élèves ambitieux."
+            ),
         },
     ]
 
     changed = False
+
     for item in defaults:
+
         plan = (
             db.query(SubscriptionPlan)
-            .filter(SubscriptionPlan.code == item["code"])
+            .filter(
+                SubscriptionPlan.code == item["code"]
+            )
             .first()
         )
+
         if plan:
             continue
 
@@ -140,22 +193,16 @@ def ensure_default_subscription_plans(db: Session):
                 is_premium=True,
             )
         )
+
         changed = True
 
     if changed:
         db.commit()
 
 
-async def verify_campay_transaction(transaction: PaymentTransaction):
-    reference = transaction.provider_reference or transaction.external_reference
-    result = await campay_service.check_transaction_status(reference)
-
-    if not result["success"]:
-        return result, None, "PENDING"
-
-    data = result["data"]
-    return result, data, normalize_payment_status(data.get("status"))
-
+# ============================================================
+# ADMIN - CREATE PLAN
+# ============================================================
 
 @router.post("/plans")
 def create_subscription_plan(
@@ -168,15 +215,52 @@ def create_subscription_plan(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    if current_user.role not in ["ADMIN", "PROMOTEUR", "ADMINISTRATEUR"]:
-        raise HTTPException(403, "Accès réservé à l'administration")
+
+    if current_user.role not in [
+        "ADMIN",
+        "PROMOTEUR",
+        "ADMINISTRATEUR",
+    ]:
+        raise HTTPException(
+            status_code=403,
+            detail="Accès réservé à l'administration",
+        )
+
+    if price_xaf <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail="Le prix doit être supérieur à zéro",
+        )
+
+    if duration_days <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail="La durée doit être supérieure à zéro",
+        )
+
+    existing = (
+        db.query(SubscriptionPlan)
+        .filter(
+            SubscriptionPlan.code == code
+        )
+        .first()
+    )
+
+    if existing:
+        raise HTTPException(
+            status_code=409,
+            detail="Un plan avec ce code existe déjà",
+        )
 
     plan = SubscriptionPlan(
         code=code,
         name=name,
         price_xaf=price_xaf,
         duration_days=duration_days,
-        period=normalize_period(period, duration_days),
+        period=normalize_period(
+            period,
+            duration_days,
+        ),
         description=description,
         is_active=True,
         is_premium=True,
@@ -189,18 +273,32 @@ def create_subscription_plan(
     return plan
 
 
+# ============================================================
+# GET PLANS
+# ============================================================
+
 @router.get("/plans")
 def get_subscription_plans(
     db: Session = Depends(get_db),
 ):
+
     ensure_default_subscription_plans(db)
+
     return (
         db.query(SubscriptionPlan)
-        .filter(SubscriptionPlan.is_active == True)
-        .order_by(SubscriptionPlan.price_xaf.asc())
+        .filter(
+            SubscriptionPlan.is_active == True
+        )
+        .order_by(
+            SubscriptionPlan.price_xaf.asc()
+        )
         .all()
     )
 
+
+# ============================================================
+# INIT MONETBIL PAYMENT
+# ============================================================
 
 @router.post("/init")
 async def init_payment(
@@ -208,6 +306,11 @@ async def init_payment(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+
+    # --------------------------------------------------------
+    # Find plan
+    # --------------------------------------------------------
+
     plan = (
         db.query(SubscriptionPlan)
         .filter(
@@ -218,22 +321,42 @@ async def init_payment(
     )
 
     if not plan:
-        raise HTTPException(404, "Plan introuvable")
+        raise HTTPException(
+            status_code=404,
+            detail="Plan introuvable",
+        )
 
-    method = payload.payment_method.upper()
+    # --------------------------------------------------------
+    # Amount comes ONLY from SubscriptionPlan
+    # --------------------------------------------------------
 
-    if method not in ["MTN", "ORANGE"]:
-        raise HTTPException(400, "Méthode invalide. Utilisez MTN ou ORANGE")
+    amount = plan.price_xaf
 
-    external_reference = f"GANSEKOU-{uuid.uuid4()}"
+    if amount <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail="Le prix du plan est invalide",
+        )
+
+    # --------------------------------------------------------
+    # Internal transaction reference
+    # --------------------------------------------------------
+
+    external_reference = (
+        f"GANSEKOU-{uuid.uuid4()}"
+    )
+
+    # --------------------------------------------------------
+    # Create local transaction
+    # --------------------------------------------------------
 
     transaction = PaymentTransaction(
         user_id=current_user.id,
         plan_id=plan.id,
-        payment_method=method,
+        payment_method="MONETBIL",
         external_reference=external_reference,
         phone_number=payload.phone_number,
-        amount_xaf=plan.price_xaf,
+        amount_xaf=amount,
         currency="XAF",
         status="PENDING",
     )
@@ -242,83 +365,169 @@ async def init_payment(
     db.commit()
     db.refresh(transaction)
 
-    result = await campay_service.collect_payment(
-        amount=plan.price_xaf,
-        phone_number=payload.phone_number,
-        description=f"Abonnement Gansekou - {plan.name}",
-        external_reference=external_reference,
+    # --------------------------------------------------------
+    # User information
+    # --------------------------------------------------------
+
+    user_id = str(current_user.id)
+
+    first_name = getattr(
+        current_user,
+        "first_name",
+        None,
     )
 
-    transaction.provider_response = result
+    last_name = getattr(
+        current_user,
+        "last_name",
+        None,
+    )
+
+    email = getattr(
+        current_user,
+        "email",
+        None,
+    )
+
+    # --------------------------------------------------------
+    # Monetbil
+    # --------------------------------------------------------
+
+    result = await monetbil_service.create_payment(
+        amount=amount,
+
+        payment_ref=external_reference,
+
+        user=user_id,
+
+        item_ref=str(plan.id),
+
+        phone=payload.phone_number,
+
+        first_name=first_name,
+
+        last_name=last_name,
+
+        email=email,
+
+        return_url=settings.MONETBIL_RETURN_URL,
+
+        notify_url=settings.MONETBIL_NOTIFY_URL,
+    )
+
+    # --------------------------------------------------------
+    # Failed initialization
+    # --------------------------------------------------------
 
     if not result["success"]:
+
         transaction.status = "FAILED"
+
+        transaction.provider_response = result
+
         db.commit()
 
         raise HTTPException(
             status_code=400,
             detail={
-                "message": "Échec initialisation paiement CamPay",
-                "campay_response": result,
-            }
+                "message": (
+                    "Impossible d'initialiser "
+                    "le paiement Monetbil"
+                ),
+                "monetbil_response": result,
+            },
         )
 
-    data = result["data"]
+    # --------------------------------------------------------
+    # Save Monetbil response
+    # --------------------------------------------------------
 
-    transaction.provider_reference = (
-        data.get("reference")
-        or data.get("operator_reference")
-        or data.get("external_reference")
-    )
-
-    initial_status = normalize_payment_status(data.get("status"))
-    transaction.status = "PENDING" if initial_status == "SUCCESS" else initial_status
+    transaction.provider_response = result
 
     db.commit()
     db.refresh(transaction)
 
+    # --------------------------------------------------------
+    # Return payment URL
+    # --------------------------------------------------------
+
     return {
-        "message": "Paiement initié. Confirmez sur votre téléphone.",
+        "message": (
+            "Paiement initialisé. "
+            "Redirection vers Monetbil."
+        ),
         "transaction_id": transaction.id,
-        "external_reference": transaction.external_reference,
-        "provider_reference": transaction.provider_reference,
+        "external_reference": (
+            transaction.external_reference
+        ),
         "status": transaction.status,
         "amount_xaf": transaction.amount_xaf,
         "currency": transaction.currency,
-        "provider_response": data,
+        "payment_url": result.get("payment_url"),
+        "plan": {
+            "id": plan.id,
+            "code": plan.code,
+            "name": plan.name,
+            "price_xaf": plan.price_xaf,
+            "duration_days": plan.duration_days,
+            "period": plan.period,
+        },
     }
 
+
+# ============================================================
+# MY TRANSACTIONS
+# ============================================================
 
 @router.get("/transactions/me")
 def get_my_transactions(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+
     return (
         db.query(PaymentTransaction)
-        .filter(PaymentTransaction.user_id == current_user.id)
-        .order_by(PaymentTransaction.created_at.desc())
+        .filter(
+            PaymentTransaction.user_id
+            == current_user.id
+        )
+        .order_by(
+            PaymentTransaction.created_at.desc()
+        )
         .all()
     )
 
+
+# ============================================================
+# MY SUBSCRIPTION
+# ============================================================
 
 @router.get("/subscription/me")
 def get_my_subscription(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+
     subscription = (
         db.query(UserSubscription)
         .filter(
-            UserSubscription.user_id == current_user.id,
-            UserSubscription.status == "ACTIVE",
-            UserSubscription.expires_at > datetime.now(timezone.utc),
+            UserSubscription.user_id
+            == current_user.id,
+
+            UserSubscription.status
+            == "ACTIVE",
+
+            UserSubscription.expires_at
+            > datetime.now(timezone.utc),
         )
-        .order_by(UserSubscription.expires_at.desc())
+        .order_by(
+            UserSubscription.expires_at.desc()
+        )
         .first()
     )
 
     if not subscription:
+
         return {
             "is_premium": False,
             "subscription": None,
@@ -330,112 +539,313 @@ def get_my_subscription(
     }
 
 
-@router.post("/transactions/{transaction_id}/verify")
-async def verify_transaction(
-    transaction_id: uuid.UUID,
+# ============================================================
+# MONETBIL WEBHOOK
+# ============================================================
+
+@router.post("/webhook/monetbil")
+async def monetbil_webhook(
+    request: Request,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
 ):
+
+    # --------------------------------------------------------
+    # Monetbil can send GET or POST according to its docs.
+    # Here we support POST body + query parameters.
+    # --------------------------------------------------------
+
+    payload: dict[str, Any] = {}
+
+    try:
+        content_type = (
+            request.headers.get(
+                "content-type",
+                ""
+            )
+            .lower()
+        )
+
+        if "application/json" in content_type:
+
+            body = await request.json()
+
+            if isinstance(body, dict):
+                payload.update(body)
+
+        elif (
+            "application/x-www-form-urlencoded"
+            in content_type
+        ):
+
+            form = await request.form()
+
+            payload.update(
+                dict(form)
+            )
+
+        else:
+
+            form = await request.form()
+
+            if form:
+                payload.update(
+                    dict(form)
+                )
+
+    except Exception:
+        pass
+
+    # --------------------------------------------------------
+    # Add query parameters
+    # --------------------------------------------------------
+
+    for key, value in request.query_params.items():
+
+        if key not in payload:
+            payload[key] = value
+
+    # --------------------------------------------------------
+    # Extract references
+    # --------------------------------------------------------
+
+    payment_ref = payload.get(
+        "payment_ref"
+    )
+
+    transaction_id = payload.get(
+        "transaction_id"
+    )
+
+    transaction_uuid = payload.get(
+        "transaction_uuid"
+    )
+
+    monetbil_status = payload.get(
+        "status"
+    )
+
+    service = payload.get(
+        "service"
+    )
+
+    # --------------------------------------------------------
+    # Validate service
+    # --------------------------------------------------------
+
+    if service and service != settings.MONETBIL_SERVICE_KEY:
+
+        raise HTTPException(
+            status_code=403,
+            detail="Service Monetbil invalide",
+        )
+
+    # --------------------------------------------------------
+    # Payment reference required
+    # --------------------------------------------------------
+
+    if not payment_ref:
+
+        raise HTTPException(
+            status_code=400,
+            detail="payment_ref manquant",
+        )
+
+    # --------------------------------------------------------
+    # Find local transaction
+    # --------------------------------------------------------
+
     transaction = (
         db.query(PaymentTransaction)
         .filter(
-            PaymentTransaction.id == transaction_id,
-            PaymentTransaction.user_id == current_user.id,
+            PaymentTransaction.external_reference
+            == payment_ref
         )
         .first()
     )
 
     if not transaction:
-        raise HTTPException(404, "Transaction introuvable")
 
-    result, data, verified_status = await verify_campay_transaction(transaction)
+        raise HTTPException(
+            status_code=404,
+            detail="Transaction introuvable",
+        )
 
-    if not result["success"]:
-        transaction.provider_response = result
-        db.commit()
-        raise HTTPException(400, "Impossible de vérifier la transaction")
+    # --------------------------------------------------------
+    # Idempotency
+    # --------------------------------------------------------
 
-    transaction.provider_response = data
+    if transaction.status == "SUCCESS":
 
-    if verified_status == "SUCCESS":
-        plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.id == transaction.plan_id).first()
+        return {
+            "message": "Transaction déjà traitée",
+            "status": "SUCCESS",
+        }
 
-        if plan:
-            activate_subscription_once(db, transaction, plan)
+    # --------------------------------------------------------
+    # Validate amount
+    # --------------------------------------------------------
+
+    received_amount = payload.get(
+        "amount"
+    )
+
+    if received_amount is not None:
+
+        try:
+
+            received_amount_int = int(
+                float(received_amount)
+            )
+
+        except (
+            TypeError,
+            ValueError,
+        ):
+
+            raise HTTPException(
+                status_code=400,
+                detail="Montant Monetbil invalide",
+            )
+
+        if (
+            received_amount_int
+            != transaction.amount_xaf
+        ):
+
+            transaction.provider_response = {
+                "error": "Montant différent",
+                "received": received_amount,
+                "expected": transaction.amount_xaf,
+                "payload": payload,
+            }
+
+            db.commit()
+
+            raise HTTPException(
+                status_code=400,
+                detail="Montant du paiement invalide",
+            )
+
+    # --------------------------------------------------------
+    # Validate currency
+    # --------------------------------------------------------
+
+    currency = payload.get(
+        "currency"
+    )
+
+    if currency and currency.upper() != "XAF":
+
+        raise HTTPException(
+            status_code=400,
+            detail="Devise invalide",
+        )
+
+    # --------------------------------------------------------
+    # Get plan
+    # --------------------------------------------------------
+
+    plan = (
+        db.query(SubscriptionPlan)
+        .filter(
+            SubscriptionPlan.id
+            == transaction.plan_id
+        )
+        .first()
+    )
+
+    if not plan:
+
+        raise HTTPException(
+            status_code=404,
+            detail="Plan associé introuvable",
+        )
+
+    # --------------------------------------------------------
+    # Save provider response
+    # --------------------------------------------------------
+
+    transaction.provider_response = {
+        "webhook": payload,
+        "monetbil": {
+            "transaction_id": transaction_id,
+            "transaction_uuid": transaction_uuid,
+        },
+    }
+
+    # --------------------------------------------------------
+    # Normalize status
+    # --------------------------------------------------------
+
+    normalized_status = normalize_payment_status(
+        monetbil_status
+    )
+
+    # --------------------------------------------------------
+    # SUCCESS
+    # --------------------------------------------------------
+
+    if normalized_status == "SUCCESS":
+
+        activate_subscription_once(
+            db,
+            transaction,
+            plan,
+        )
+
+    # --------------------------------------------------------
+    # FAILED
+    # --------------------------------------------------------
+
+    elif normalized_status == "FAILED":
+
+        transaction.status = "FAILED"
+
+    # --------------------------------------------------------
+    # Pending / unknown
+    # --------------------------------------------------------
+
     else:
-        transaction.status = verified_status
+
+        transaction.status = "PENDING"
 
     db.commit()
     db.refresh(transaction)
 
     return {
-        "transaction": transaction,
-        "provider_response": data,
+        "message": "Webhook Monetbil traité",
+        "status": transaction.status,
+        "transaction_id": transaction.id,
+        "monetbil_transaction_id": transaction_id,
     }
 
 
-@router.post("/webhook/campay")
-async def campay_webhook(
-    request: Request,
+# ============================================================
+# MANUAL STATUS CHECK
+# ============================================================
+
+@router.get("/transactions/{transaction_id}")
+def get_transaction(
+    transaction_id: uuid.UUID,
     db: Session = Depends(get_db),
-    x_campay_signature: str | None = Header(default=None),
+    current_user: User = Depends(get_current_user),
 ):
-    payload = await request.json()
-
-    # CamPay peut envoyer une clé/signature selon la configuration.
-    # Ici on vérifie aussi la présence de la webhook key si tu l'envoies en header custom.
-    webhook_key = request.headers.get("X-CamPay-Webhook-Key")
-
-    if not is_valid_webhook_secret(webhook_key, x_campay_signature):
-        raise HTTPException(403, "Webhook invalide")
-
-    reference = (
-        payload.get("external_reference")
-        or payload.get("reference")
-        or payload.get("operator_reference")
-    )
-
-    if not reference:
-        raise HTTPException(400, "Référence manquante")
 
     transaction = (
         db.query(PaymentTransaction)
         .filter(
-            (PaymentTransaction.external_reference == reference)
-            | (PaymentTransaction.provider_reference == reference)
+            PaymentTransaction.id == transaction_id,
+            PaymentTransaction.user_id
+            == current_user.id,
         )
         .first()
     )
 
     if not transaction:
-        raise HTTPException(404, "Transaction introuvable")
 
-    result, data, verified_status = await verify_campay_transaction(transaction)
+        raise HTTPException(
+            status_code=404,
+            detail="Transaction introuvable",
+        )
 
-    if not result["success"]:
-        transaction.provider_response = {
-            "webhook_payload": payload,
-            "verification": result,
-        }
-        db.commit()
-        raise HTTPException(400, "Impossible de vÃ©rifier la transaction")
-
-    transaction.provider_response = {
-        "webhook_payload": payload,
-        "verification": data,
-    }
-
-    if verified_status == "SUCCESS":
-        plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.id == transaction.plan_id).first()
-
-        if plan:
-            activate_subscription_once(db, transaction, plan)
-    else:
-        transaction.status = verified_status
-
-    db.commit()
-
-    return {
-        "message": "Webhook traité",
-        "status": transaction.status,
-    }
+    return transaction
