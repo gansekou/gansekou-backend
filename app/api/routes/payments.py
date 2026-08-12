@@ -58,19 +58,19 @@ def normalize_payment_status(
     if not status:
         return "PENDING"
 
-    normalized = str(status).upper().strip()
+    normalized = str(status).lower().strip()
 
     if normalized in [
-        "SUCCESS",
-        "SUCCESSFUL",
-        "COMPLETED",
+        "success",
+        "successful",
+        "completed",
     ]:
         return "SUCCESS"
 
     if normalized in [
-        "FAILED",
-        "CANCELLED",
-        "CANCELED",
+        "failed",
+        "cancelled",
+        "canceled",
     ]:
         return "FAILED"
 
@@ -307,9 +307,9 @@ async def init_payment(
     current_user: User = Depends(get_current_user),
 ):
 
-    # --------------------------------------------------------
-    # Find plan
-    # --------------------------------------------------------
+    # ========================================================
+    # PLAN
+    # ========================================================
 
     plan = (
         db.query(SubscriptionPlan)
@@ -326,9 +326,9 @@ async def init_payment(
             detail="Plan introuvable",
         )
 
-    # --------------------------------------------------------
-    # Amount comes ONLY from SubscriptionPlan
-    # --------------------------------------------------------
+    # ========================================================
+    # AMOUNT
+    # ========================================================
 
     amount = plan.price_xaf
 
@@ -338,17 +338,40 @@ async def init_payment(
             detail="Le prix du plan est invalide",
         )
 
-    # --------------------------------------------------------
-    # Internal transaction reference
-    # --------------------------------------------------------
+    # ========================================================
+    # PHONE
+    # ========================================================
+
+    normalized_phone = None
+
+    if payload.phone_number:
+
+        normalized_phone = (
+            monetbil_service.normalize_cameroon_phone(
+                payload.phone_number
+            )
+        )
+
+        if not normalized_phone:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Numéro camerounais invalide. "
+                    "Utilisez par exemple 6XXXXXXXX."
+                ),
+            )
+
+    # ========================================================
+    # REFERENCE
+    # ========================================================
 
     external_reference = (
         f"GANSEKOU-{uuid.uuid4()}"
     )
 
-    # --------------------------------------------------------
-    # Create local transaction
-    # --------------------------------------------------------
+    # ========================================================
+    # LOCAL TRANSACTION
+    # ========================================================
 
     transaction = PaymentTransaction(
         user_id=current_user.id,
@@ -356,7 +379,7 @@ async def init_payment(
         provider="MONETBIL",
         payment_method="MONETBIL",
         external_reference=external_reference,
-        phone_number=payload.phone_number,
+        phone_number=normalized_phone,
         amount_xaf=amount,
         currency="XAF",
         status="PENDING",
@@ -366,9 +389,9 @@ async def init_payment(
     db.commit()
     db.refresh(transaction)
 
-    # --------------------------------------------------------
-    # User information
-    # --------------------------------------------------------
+    # ========================================================
+    # USER INFO
+    # ========================================================
 
     user_id = str(current_user.id)
 
@@ -390,40 +413,30 @@ async def init_payment(
         None,
     )
 
-    # --------------------------------------------------------
-    # Monetbil
-    # --------------------------------------------------------
+    # ========================================================
+    # MONETBIL
+    # ========================================================
 
     result = await monetbil_service.create_payment(
         amount=amount,
-
         payment_ref=external_reference,
-
         user=user_id,
-
         item_ref=str(plan.id),
-
-        phone=payload.phone_number,
-
+        phone=normalized_phone,
         first_name=first_name,
-
         last_name=last_name,
-
         email=email,
-
         return_url=settings.MONETBIL_RETURN_URL,
-
         notify_url=settings.MONETBIL_NOTIFY_URL,
     )
 
-    # --------------------------------------------------------
-    # Failed initialization
-    # --------------------------------------------------------
+    # ========================================================
+    # INIT FAILED
+    # ========================================================
 
     if not result["success"]:
 
         transaction.status = "FAILED"
-
         transaction.provider_response = result
 
         db.commit()
@@ -439,34 +452,34 @@ async def init_payment(
             },
         )
 
-    # --------------------------------------------------------
-    # Save Monetbil response
-    # --------------------------------------------------------
+    # ========================================================
+    # SAVE MONETBIL RESPONSE
+    # ========================================================
 
     transaction.provider_response = result
 
     db.commit()
     db.refresh(transaction)
 
-    # --------------------------------------------------------
-    # Return payment URL
-    # --------------------------------------------------------
+    # ========================================================
+    # RESPONSE
+    # ========================================================
 
     return {
         "message": (
             "Paiement initialisé. "
             "Redirection vers Monetbil."
         ),
-        "transaction_id": transaction.id,
+        "transaction_id": str(transaction.id),
         "external_reference": (
             transaction.external_reference
         ),
         "status": transaction.status,
         "amount_xaf": transaction.amount_xaf,
         "currency": transaction.currency,
-        "payment_url": result.get("payment_url"),
+        "payment_url": result["payment_url"],
         "plan": {
-            "id": plan.id,
+            "id": str(plan.id),
             "code": plan.code,
             "name": plan.name,
             "price_xaf": plan.price_xaf,
@@ -474,7 +487,6 @@ async def init_payment(
             "period": plan.period,
         },
     }
-
 
 # ============================================================
 # MY TRANSACTIONS
@@ -550,18 +562,18 @@ async def monetbil_webhook(
     db: Session = Depends(get_db),
 ):
 
-    # --------------------------------------------------------
-    # Monetbil can send GET or POST according to its docs.
-    # Here we support POST body + query parameters.
-    # --------------------------------------------------------
+    # ========================================================
+    # READ PAYLOAD
+    # ========================================================
 
     payload: dict[str, Any] = {}
 
     try:
+
         content_type = (
             request.headers.get(
                 "content-type",
-                ""
+                "",
             )
             .lower()
         )
@@ -580,38 +592,35 @@ async def monetbil_webhook(
 
             form = await request.form()
 
-            payload.update(
-                dict(form)
-            )
+            payload.update(dict(form))
 
         else:
 
             form = await request.form()
 
             if form:
-                payload.update(
-                    dict(form)
-                )
+                payload.update(dict(form))
 
     except Exception:
+
         pass
 
-    # --------------------------------------------------------
-    # Add query parameters
-    # --------------------------------------------------------
+    # ========================================================
+    # QUERY PARAMETERS
+    # ========================================================
 
     for key, value in request.query_params.items():
 
         if key not in payload:
             payload[key] = value
 
-    # --------------------------------------------------------
-    # Extract references
-    # --------------------------------------------------------
+    # ========================================================
+    # EXTRACT
+    # ========================================================
 
-    payment_ref = payload.get(
-        "payment_ref"
-    )
+    service = payload.get("service")
+
+    payment_ref = payload.get("payment_ref")
 
     transaction_id = payload.get(
         "transaction_id"
@@ -621,28 +630,39 @@ async def monetbil_webhook(
         "transaction_uuid"
     )
 
-    monetbil_status = payload.get(
-        "status"
+    monetbil_status = payload.get("status")
+
+    amount = payload.get("amount")
+
+    currency = payload.get("currency")
+
+    country_iso = payload.get("country_iso")
+
+    # ========================================================
+    # VALIDATE SERVICE
+    # ========================================================
+
+    expected_service = (
+        settings.MONETBIL_SERVICE_KEY
     )
 
-    service = payload.get(
-        "service"
-    )
+    if not service:
 
-    # --------------------------------------------------------
-    # Validate service
-    # --------------------------------------------------------
+        raise HTTPException(
+            status_code=403,
+            detail="Service Monetbil manquant",
+        )
 
-    if service and service != settings.MONETBIL_SERVICE_KEY:
+    if service != expected_service:
 
         raise HTTPException(
             status_code=403,
             detail="Service Monetbil invalide",
         )
 
-    # --------------------------------------------------------
-    # Payment reference required
-    # --------------------------------------------------------
+    # ========================================================
+    # PAYMENT REF
+    # ========================================================
 
     if not payment_ref:
 
@@ -651,9 +671,9 @@ async def monetbil_webhook(
             detail="payment_ref manquant",
         )
 
-    # --------------------------------------------------------
-    # Find local transaction
-    # --------------------------------------------------------
+    # ========================================================
+    # FIND TRANSACTION
+    # ========================================================
 
     transaction = (
         db.query(PaymentTransaction)
@@ -671,31 +691,30 @@ async def monetbil_webhook(
             detail="Transaction introuvable",
         )
 
-    # --------------------------------------------------------
-    # Idempotency
-    # --------------------------------------------------------
+    # ========================================================
+    # IDEMPOTENCY
+    # ========================================================
 
     if transaction.status == "SUCCESS":
 
         return {
             "message": "Transaction déjà traitée",
             "status": "SUCCESS",
+            "transaction_id": str(
+                transaction.id
+            ),
         }
 
-    # --------------------------------------------------------
-    # Validate amount
-    # --------------------------------------------------------
+    # ========================================================
+    # VALIDATE AMOUNT
+    # ========================================================
 
-    received_amount = payload.get(
-        "amount"
-    )
-
-    if received_amount is not None:
+    if amount is not None:
 
         try:
 
-            received_amount_int = int(
-                float(received_amount)
+            received_amount = int(
+                float(amount)
             )
 
         except (
@@ -709,14 +728,16 @@ async def monetbil_webhook(
             )
 
         if (
-            received_amount_int
+            received_amount
             != transaction.amount_xaf
         ):
 
             transaction.provider_response = {
                 "error": "Montant différent",
-                "received": received_amount,
-                "expected": transaction.amount_xaf,
+                "received": amount,
+                "expected": (
+                    transaction.amount_xaf
+                ),
                 "payload": payload,
             }
 
@@ -724,27 +745,42 @@ async def monetbil_webhook(
 
             raise HTTPException(
                 status_code=400,
-                detail="Montant du paiement invalide",
+                detail=(
+                    "Montant du paiement invalide"
+                ),
             )
 
-    # --------------------------------------------------------
-    # Validate currency
-    # --------------------------------------------------------
+    # ========================================================
+    # VALIDATE CURRENCY
+    # ========================================================
 
-    currency = payload.get(
-        "currency"
-    )
-
-    if currency and currency.upper() != "XAF":
+    if (
+        currency
+        and str(currency).upper() != "XAF"
+    ):
 
         raise HTTPException(
             status_code=400,
             detail="Devise invalide",
         )
 
-    # --------------------------------------------------------
-    # Get plan
-    # --------------------------------------------------------
+    # ========================================================
+    # VALIDATE COUNTRY
+    # ========================================================
+
+    if (
+        country_iso
+        and str(country_iso).upper() != "CM"
+    ):
+
+        raise HTTPException(
+            status_code=400,
+            detail="Pays de paiement invalide",
+        )
+
+    # ========================================================
+    # PLAN
+    # ========================================================
 
     plan = (
         db.query(SubscriptionPlan)
@@ -762,9 +798,9 @@ async def monetbil_webhook(
             detail="Plan associé introuvable",
         )
 
-    # --------------------------------------------------------
-    # Save provider response
-    # --------------------------------------------------------
+    # ========================================================
+    # SAVE PROVIDER RESPONSE
+    # ========================================================
 
     transaction.provider_response = {
         "webhook": payload,
@@ -774,41 +810,47 @@ async def monetbil_webhook(
         },
     }
 
-    # --------------------------------------------------------
-    # Normalize status
-    # --------------------------------------------------------
+    # ========================================================
+    # STATUS
+    # ========================================================
 
-    normalized_status = normalize_payment_status(
-        monetbil_status
+    normalized_status = (
+        normalize_payment_status(
+            monetbil_status
+        )
     )
 
-    # --------------------------------------------------------
+    # ========================================================
     # SUCCESS
-    # --------------------------------------------------------
+    # ========================================================
 
     if normalized_status == "SUCCESS":
 
         activate_subscription_once(
-            db,
-            transaction,
-            plan,
+            db=db,
+            transaction=transaction,
+            plan=plan,
         )
 
-    # --------------------------------------------------------
+    # ========================================================
     # FAILED
-    # --------------------------------------------------------
+    # ========================================================
 
     elif normalized_status == "FAILED":
 
         transaction.status = "FAILED"
 
-    # --------------------------------------------------------
-    # Pending / unknown
-    # --------------------------------------------------------
+    # ========================================================
+    # PENDING / UNKNOWN
+    # ========================================================
 
     else:
 
         transaction.status = "PENDING"
+
+    # ========================================================
+    # COMMIT
+    # ========================================================
 
     db.commit()
     db.refresh(transaction)
@@ -816,8 +858,12 @@ async def monetbil_webhook(
     return {
         "message": "Webhook Monetbil traité",
         "status": transaction.status,
-        "transaction_id": transaction.id,
-        "monetbil_transaction_id": transaction_id,
+        "transaction_id": str(
+            transaction.id
+        ),
+        "monetbil_transaction_id": (
+            transaction_id
+        ),
     }
 
 
