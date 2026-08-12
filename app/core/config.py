@@ -28,6 +28,11 @@ class Settings(BaseSettings):
     R2_ACCESS_KEY_ID: str
     R2_SECRET_ACCESS_KEY: str
     R2_ENDPOINT: str
+    MONETBIL_SERVICE_KEY: str = ""
+    MONETBIL_SERVICE_SECRET: str = ""
+    
+    MONETBIL_RETURN_URL: str = ""
+    MONETBIL_NOTIFY_URL: str = ""
 
     @field_validator("DATABASE_URL", mode="before")
     @classmethod
