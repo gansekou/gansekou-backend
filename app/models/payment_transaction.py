@@ -20,6 +20,11 @@ class PaymentTransaction(Base):
 
     external_reference: Mapped[str] = mapped_column(String(150), unique=True, nullable=False, index=True)
     provider_reference: Mapped[str | None] = mapped_column(String(150), nullable=True, index=True)
+    monetbil_payment_id: Mapped[str | None] = mapped_column(
+        String(150),
+        nullable=True,
+        index=True
+    )
 
     phone_number: Mapped[str] = mapped_column(String(30), nullable=False)
     amount_xaf: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -34,3 +39,6 @@ class PaymentTransaction(Base):
 
     user = relationship("User")
     plan = relationship("SubscriptionPlan")
+    
+
+
