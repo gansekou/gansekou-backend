@@ -353,6 +353,7 @@ async def init_payment(
     transaction = PaymentTransaction(
         user_id=current_user.id,
         plan_id=plan.id,
+        provider="MONETBIL",
         payment_method="MONETBIL",
         external_reference=external_reference,
         phone_number=payload.phone_number,
