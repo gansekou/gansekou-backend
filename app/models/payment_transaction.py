@@ -15,8 +15,8 @@ class PaymentTransaction(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
     plan_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("subscription_plans.id"), nullable=True, index=True)
 
-    provider: Mapped[str] = mapped_column(String(50), default="CAMPAY", index=True)
-    payment_method: Mapped[str] = mapped_column(String(30), nullable=False)  # MTN / ORANGE
+    provider: Mapped[str] = mapped_column(String(50), default="MONETBIL", index=True)
+    payment_method: Mapped[str] = mapped_column(String(30), nullable=False)  # MONETBIL
 
     external_reference: Mapped[str] = mapped_column(String(150), unique=True, nullable=False, index=True)
     provider_reference: Mapped[str | None] = mapped_column(String(150), nullable=True, index=True)
