@@ -422,13 +422,12 @@ async def init_payment(
         payment_ref=external_reference,
         user=user_id,
         item_ref=str(plan.id),
-        phone=payload.phone_number,
+        phone=normalized_phone,
         first_name=first_name,
         last_name=last_name,
         email=email,
         notify_url=settings.MONETBIL_NOTIFY_URL,
     )
-
         # ========================================================
         # INIT FAILED
         # ========================================================
