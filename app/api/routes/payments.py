@@ -306,7 +306,6 @@ async def init_payment(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-
     # ========================================================
     # PLAN
     # ========================================================
@@ -345,7 +344,6 @@ async def init_payment(
     normalized_phone = None
 
     if payload.phone_number:
-
         normalized_phone = (
             monetbil_service.normalize_cameroon_phone(
                 payload.phone_number
@@ -361,13 +359,18 @@ async def init_payment(
                 ),
             )
 
+    # Monetbil exige un numéro pour placePayment.
+    if not normalized_phone:
+        raise HTTPException(
+            status_code=400,
+            detail="Le numéro de téléphone est obligatoire.",
+        )
+
     # ========================================================
     # REFERENCE
     # ========================================================
 
-    external_reference = (
-        f"GANSEKOU-{uuid.uuid4()}"
-    )
+    external_reference = f"GANSEKOU-{uuid.uuid4()}"
 
     # ========================================================
     # LOCAL TRANSACTION
@@ -428,61 +431,62 @@ async def init_payment(
         email=email,
         notify_url=settings.MONETBIL_NOTIFY_URL,
     )
-        # ========================================================
-        # INIT FAILED
-        # ========================================================
-    
-        if not result["success"]:
-    
-            transaction.status = "FAILED"
-            transaction.provider_response = result
-    
-            db.commit()
-    
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    "message": (
-                        "Impossible d'initialiser "
-                        "le paiement Monetbil"
-                    ),
-                    "monetbil_response": result,
-                },
-            )
-    
-        # ========================================================
-        # MONETBIL PAYMENT ID
-        # ========================================================
-    
-        payment_id = result.get("payment_id")
-    
-        if not payment_id:
-    
-            transaction.status = "FAILED"
-            transaction.provider_response = result
-    
-            db.commit()
-    
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    "message": (
-                        "Monetbil n'a pas retourné "
-                        "de paymentId"
-                    ),
-                    "monetbil_response": result,
-                },
-            )
-    
-        # ========================================================
-        # SAVE MONETBIL PAYMENT ID
-        # ========================================================
-    
-        transaction.monetbil_payment_id = str(payment_id)
+
+    # ========================================================
+    # INIT FAILED
+    # ========================================================
+
+    if not result["success"]:
+
+        transaction.status = "FAILED"
         transaction.provider_response = result
-    
+
         db.commit()
-        db.refresh(transaction)
+
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": (
+                    "Impossible d'initialiser "
+                    "le paiement Monetbil"
+                ),
+                "monetbil_response": result,
+            },
+        )
+
+    # ========================================================
+    # MONETBIL PAYMENT ID
+    # ========================================================
+
+    payment_id = result.get("payment_id")
+
+    if not payment_id:
+
+        transaction.status = "FAILED"
+        transaction.provider_response = result
+
+        db.commit()
+
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": (
+                    "Monetbil n'a pas retourné "
+                    "de paymentId"
+                ),
+                "monetbil_response": result,
+            },
+        )
+
+    # ========================================================
+    # SAVE MONETBIL PAYMENT ID
+    # ========================================================
+
+    transaction.monetbil_payment_id = str(payment_id)
+    transaction.provider_response = result
+
+    db.commit()
+    db.refresh(transaction)
 
     # ========================================================
     # RESPONSE
@@ -491,12 +495,10 @@ async def init_payment(
     return {
         "message": (
             "Paiement initialisé. "
-            "Redirection vers Monetbil."
+            "Paiement Monetbil en attente."
         ),
         "transaction_id": str(transaction.id),
-        "external_reference": (
-            transaction.external_reference
-        ),
+        "external_reference": transaction.external_reference,
         "status": transaction.status,
         "amount_xaf": transaction.amount_xaf,
         "currency": transaction.currency,
@@ -514,7 +516,6 @@ async def init_payment(
             "period": plan.period,
         },
     }
-
 # ============================================================
 # MY TRANSACTIONS
 # ============================================================
