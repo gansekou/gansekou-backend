@@ -22,3 +22,12 @@ class Level(Base):
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     cycle = relationship("EducationCycle")
+
+    contents = relationship(
+        "Content",
+        secondary="content_levels",
+        back_populates="levels",
+    )
+
+
+
