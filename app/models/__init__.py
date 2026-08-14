@@ -46,4 +46,7 @@ from app.models.payment_transaction import PaymentTransaction
 from .chat_conversation import ChatConversation
 from .chat_message import ChatMessage
 
+from app.models.content_level import ContentLevel
+from app.models.content_specialty import ContentSpecialty
+
 
