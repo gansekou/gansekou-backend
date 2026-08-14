@@ -25,6 +25,8 @@ from app.schemas.content_relation import (
     ContentRelationCreate,
     ContentRelationResponse,
 )
+from app.models.content_level import ContentLevel
+from app.models.content_specialty import ContentSpecialty
 from app.models.teacher_subject import TeacherSubject
 from app.services.teacher_xp_service import (
     XP_CONTENT_DOWNLOAD,
@@ -108,7 +110,10 @@ def get_contents(
 ):
     return content.get_all(db, skip=skip, limit=limit)
 
-@router.get("/related-options", response_model=list[ContentResponse])
+@router.get(
+    "/related-options",
+    response_model=list[ContentResponse],
+)
 def get_related_options(
     level_id: UUID,
     subject_id: UUID,
@@ -116,29 +121,31 @@ def get_related_options(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    """
-    Retourne tous les contenus du même niveau et de la même matière.
-    """
-
     query = (
         db.query(content.model)
-        .filter(
-            content.model.level_id == level_id,
-            content.model.subject_id == subject_id,
-            content.model.status == "APPROVED",
+        .join(
+            ContentLevel,
+            ContentLevel.content_id == content.model.id,
         )
-        .order_by(content.model.created_at.desc())
+        .filter(
+            ContentLevel.level_id == level_id,
+            content.model.subject_id == subject_id,
+        )
+        .distinct()
     )
 
-    # Exclure le contenu actuel si fourni
     if exclude_id:
         query = query.filter(
             content.model.id != exclude_id
         )
 
-    results = query.limit(50).all()
+    query = restrict_public_content_query(
+        query,
+        db,
+        current_user,
+    )
 
-    return results
+    return query.all()
 
 
 @router.get("/approved", response_model=list[ContentResponse])
@@ -163,7 +170,10 @@ def get_offline_contents(
     return restrict_public_content_query(query, db, current_user).offset(skip).limit(limit).all()
 
 
-@router.get("/by-level/{level_id}", response_model=list[ContentResponse])
+@router.get(
+    "/by-level/{level_id}",
+    response_model=list[ContentResponse],
+)
 def get_contents_by_level(
     level_id: UUID,
     skip: int = Query(default=0, ge=0),
@@ -171,8 +181,107 @@ def get_contents_by_level(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    query = db.query(content.model).filter(content.model.level_id == level_id)
-    return restrict_public_content_query(query, db, current_user).offset(skip).limit(limit).all()
+    query = (
+        db.query(content.model)
+        .join(
+            ContentLevel,
+            ContentLevel.content_id == content.model.id,
+        )
+        .filter(
+            ContentLevel.level_id == level_id
+        )
+        .distinct()
+    )
+
+    query = restrict_public_content_query(
+        query,
+        db,
+        current_user,
+    )
+
+    return (
+        query
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
+
+@router.get(
+    "/by-specialty/{specialty_id}",
+    response_model=list[ContentResponse],
+)
+def get_contents_by_specialty(
+    specialty_id: UUID,
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=50, ge=1, le=100),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    query = (
+        db.query(content.model)
+        .join(
+            ContentSpecialty,
+            ContentSpecialty.content_id == content.model.id,
+        )
+        .filter(
+            ContentSpecialty.specialty_id == specialty_id
+        )
+        .distinct()
+    )
+
+    query = restrict_public_content_query(
+        query,
+        db,
+        current_user,
+    )
+
+    return (
+        query
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
+
+@router.get(
+    "/by-level-and-specialty",
+    response_model=list[ContentResponse],
+)
+def get_contents_by_level_and_specialty(
+    level_id: UUID,
+    specialty_id: UUID,
+    subject_id: UUID | None = None,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    query = (
+        db.query(content.model)
+        .join(
+            ContentLevel,
+            ContentLevel.content_id == content.model.id,
+        )
+        .join(
+            ContentSpecialty,
+            ContentSpecialty.content_id == content.model.id,
+        )
+        .filter(
+            ContentLevel.level_id == level_id,
+            ContentSpecialty.specialty_id == specialty_id,
+        )
+        .distinct()
+    )
+
+    if subject_id:
+        query = query.filter(
+            content.model.subject_id == subject_id
+        )
+
+    query = restrict_public_content_query(
+        query,
+        db,
+        current_user,
+    )
+
+    return query.all()
 
 
 @router.get("/by-subject/{subject_id}", response_model=list[ContentResponse])
