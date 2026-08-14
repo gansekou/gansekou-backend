@@ -11,8 +11,8 @@ from app.schemas.content_translation import ContentTranslationResponse
 class ContentCreate(BaseModel):
     author_id: UUID
     subject_id: UUID
-    level_id: UUID
-    specialty_id: UUID | None = None
+    level_ids: list[UUID] = []
+    specialty_ids: list[UUID] = []
 
     content_type: str
 
@@ -37,8 +37,13 @@ class ContentResponse(ORMBaseSchema):
 
     author_id: UUID
     subject_id: UUID
-    level_id: UUID
-    specialty_id: UUID | None
+    level_ids: list[UUID] = Field(
+        default_factory=list
+    )
+    
+    specialty_ids: list[UUID] = Field(
+        default_factory=list
+    )
 
     title: str | None = None
 
