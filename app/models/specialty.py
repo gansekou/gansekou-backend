@@ -19,3 +19,9 @@ class Specialty(Base):
     description_en: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    contents = relationship(
+        "Content",
+        secondary="content_specialties",
+        back_populates="specialties",
+    )
