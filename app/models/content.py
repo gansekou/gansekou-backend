@@ -16,6 +16,9 @@ from app.database.base import Base
 from app.models.content_relation import ContentRelation
 from app.models.content_translation import ContentTranslation
 
+from app.models.content_level import ContentLevel
+from app.models.content_specialty import ContentSpecialty
+
 class Content(Base):
     __tablename__ = "contents"
 
@@ -39,19 +42,6 @@ class Content(Base):
         index=True
     )
 
-    level_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("levels.id"),
-        nullable=False,
-        index=True
-    )
-
-    specialty_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("specialties.id"),
-        nullable=True,
-        index=True
-    )
 
     # COURSE / QUIZ / EXAM / PDF / VIDEO / AUDIO
     content_type: Mapped[str] = mapped_column(
@@ -187,9 +177,17 @@ class Content(Base):
 
     subject = relationship("Subject")
 
-    level = relationship("Level")
-
-    specialty = relationship("Specialty")
+    levels = relationship(
+        "Level",
+        secondary="content_levels",
+        back_populates="contents",
+    )
+    
+    specialties = relationship(
+        "Specialty",
+        secondary="content_specialties",
+        back_populates="contents",
+    )
 
     translations = relationship(
         "ContentTranslation",
