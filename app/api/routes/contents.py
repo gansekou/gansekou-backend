@@ -145,7 +145,14 @@ def get_related_options(
         current_user,
     )
 
-    return query.all()
+    return (
+        query
+        .order_by(
+            content.model.created_at.desc(),
+            content.model.id.desc(),
+        )
+        .all()
+    )
 
 
 @router.get("/approved", response_model=list[ContentResponse])
@@ -155,8 +162,26 @@ def get_approved_contents(
     current_user=Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    query = db.query(content.model).filter(content.model.status == "APPROVED")
-    return restrict_public_content_query(query, db, current_user).offset(skip).limit(limit).all()
+    query = db.query(content.model).filter(
+        content.model.status == "APPROVED"
+    )
+    
+    query = restrict_public_content_query(
+        query,
+        db,
+        current_user,
+    )
+    
+    return (
+        query
+        .order_by(
+            content.model.created_at.desc(),
+            content.model.id.desc(),
+        )
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
 
 
 @router.get("/offline", response_model=list[ContentResponse])
@@ -166,8 +191,26 @@ def get_offline_contents(
     current_user=Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    query = db.query(content.model).filter(content.model.is_available_offline == True)
-    return restrict_public_content_query(query, db, current_user).offset(skip).limit(limit).all()
+    query = db.query(content.model).filter(
+        content.model.is_available_offline == True
+    )
+    
+    query = restrict_public_content_query(
+        query,
+        db,
+        current_user,
+    )
+    
+    return (
+        query
+        .order_by(
+            content.model.created_at.desc(),
+            content.model.id.desc(),
+        )
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
 
 
 @router.get(
@@ -201,6 +244,10 @@ def get_contents_by_level(
 
     return (
         query
+        .order_by(
+            content.model.created_at.desc(),
+            content.model.id.desc(),
+        )
         .offset(skip)
         .limit(limit)
         .all()
@@ -237,6 +284,10 @@ def get_contents_by_specialty(
 
     return (
         query
+        .order_by(
+            content.model.created_at.desc(),
+            content.model.id.desc(),
+        )
         .offset(skip)
         .limit(limit)
         .all()
@@ -281,7 +332,14 @@ def get_contents_by_level_and_specialty(
         current_user,
     )
 
-    return query.all()
+    return (
+        query
+        .order_by(
+            content.model.created_at.desc(),
+            content.model.id.desc(),
+        )
+        .all()
+    )
 
 
 @router.get("/by-subject/{subject_id}", response_model=list[ContentResponse])
@@ -292,8 +350,26 @@ def get_contents_by_subject(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    query = db.query(content.model).filter(content.model.subject_id == subject_id)
-    return restrict_public_content_query(query, db, current_user).offset(skip).limit(limit).all()
+    query = db.query(content.model).filter(
+        content.model.subject_id == subject_id
+    )
+    
+    query = restrict_public_content_query(
+        query,
+        db,
+        current_user,
+    )
+    
+    return (
+        query
+        .order_by(
+            content.model.created_at.desc(),
+            content.model.id.desc(),
+        )
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
 
 
 @router.post("/translations", response_model=ContentTranslationResponse)
@@ -377,27 +453,6 @@ def get_content_translations(
     return content_translation.get_by_content(db, content_id)
 
 
-@router.get("/{content_id}", response_model=ContentResponse)
-def get_content(
-    content_id: UUID,
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
-):
-    db_content = content.get(db, content_id)
-
-    if not db_content:
-        raise HTTPException(status_code=404, detail="Contenu introuvable")
-
-    if db_content.status != "APPROVED" and current_user.role == "ELEVE":
-        raise HTTPException(
-            status_code=403,
-            detail="Ce contenu n'est pas encore disponible pour les élèves",
-        )
-    
-    require_content_access(db, current_user, db_content)
-
-    return db_content
-
 
 @router.put("/{content_id}", response_model=ContentResponse)
 def update_content(
@@ -454,7 +509,10 @@ def get_my_contents(
     return (
         db.query(content.model)
         .filter(content.model.author_id == current_user.id)
-        .order_by(content.model.created_at.desc())
+        .order_by(
+            content.model.created_at.desc(),
+            content.model.id.desc(),
+        )
         .offset(skip)
         .limit(limit)
         .all()
@@ -470,47 +528,16 @@ def get_pending_review_contents(
     return (
         db.query(content.model)
         .filter(content.model.status == "PENDING")
-        .order_by(content.model.created_at.desc())
+        .order_by(
+            content.model.created_at.desc(),
+            content.model.id.desc(),
+        )
         .offset(skip)
         .limit(limit)
         .all()
     )
 
-@router.put("/{content_id}/publish", response_model=ContentResponse)
-def publish_content(
-    content_id: UUID,
-    db: Session = Depends(get_db),
-    current_user=Depends(require_roles(ADMIN_ROLES)),
-):
-    db_content = content.get(db, content_id)
 
-    if not db_content:
-        raise HTTPException(404, "Contenu introuvable")
-
-    db_content.status = "APPROVED"
-
-    db.commit()
-    db.refresh(db_content)
-
-    return db_content
-
-@router.put("/{content_id}/archive", response_model=ContentResponse)
-def archive_content(
-    content_id: UUID,
-    db: Session = Depends(get_db),
-    current_user=Depends(require_roles(ADMIN_ROLES)),
-):
-    db_content = content.get(db, content_id)
-
-    if not db_content:
-        raise HTTPException(404, "Contenu introuvable")
-
-    db_content.status = "ARCHIVED"
-
-    db.commit()
-    db.refresh(db_content)
-
-    return db_content
 
 
 @router.get("/search/", response_model=list[ContentResponse])
@@ -528,7 +555,20 @@ def search_contents(
             content.model.tags.ilike(f"%{query}%")
         )
     )
-    return restrict_public_content_query(db_query, db, current_user).offset(skip).limit(limit).all()
+    return (
+        restrict_public_content_query(
+            db_query,
+            db,
+            current_user,
+        )
+        .order_by(
+            content.model.created_at.desc(),
+            content.model.id.desc(),
+        )
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
 
 
 @router.get("/by-type/{content_type}", response_model=list[ContentResponse])
@@ -546,7 +586,20 @@ def get_contents_by_type(
             content.model.content_type == normalize_content_type(content_type),
         )
     )
-    return restrict_public_content_query(query, db, current_user).offset(skip).limit(limit).all()
+    return (
+        restrict_public_content_query(
+            query,
+            db,
+            current_user,
+        )
+        .order_by(
+            content.model.created_at.desc(),
+            content.model.id.desc(),
+        )
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
 
 
 @router.get("/premium/all", response_model=list[ContentResponse])
@@ -563,7 +616,20 @@ def get_premium_contents(
         content.model.status == "APPROVED",
         content.model.is_premium == True,
     )
-    return restrict_content_query_by_user(query, current_user, db).offset(skip).limit(limit).all()
+    return (
+        restrict_content_query_by_user(
+            query,
+            current_user,
+            db,
+        )
+        .order_by(
+            content.model.created_at.desc(),
+            content.model.id.desc(),
+        )
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
 
 
 @router.get("/featured/all", response_model=list[ContentResponse])
@@ -580,7 +646,20 @@ def get_featured_contents(
             content.model.is_featured == True,
         )
     )
-    return restrict_public_content_query(query, db, current_user).offset(skip).limit(limit).all()
+    return (
+        restrict_public_content_query(
+            query,
+            db,
+            current_user,
+        )
+        .order_by(
+            content.model.created_at.desc(),
+            content.model.id.desc(),
+        )
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
 
 
 @router.get("/popular/all", response_model=list[ContentResponse])
@@ -592,7 +671,17 @@ def get_popular_contents(
 ):
     query = db.query(content.model).filter(content.model.status == "APPROVED")
     query = restrict_public_content_query(query, db, current_user)
-    return query.order_by(content.model.total_views.desc()).offset(skip).limit(limit).all()
+    return (
+        query
+        .order_by(
+            content.model.total_views.desc(),
+            content.model.created_at.desc(),
+            content.model.id.desc(),
+        )
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
 
 
 @router.get("/recent/all", response_model=list[ContentResponse])
@@ -604,7 +693,16 @@ def get_recent_contents(
 ):
     query = db.query(content.model).filter(content.model.status == "APPROVED")
     query = restrict_public_content_query(query, db, current_user)
-    return query.order_by(content.model.created_at.desc()).offset(skip).limit(limit).all()
+    return (
+        query
+        .order_by(
+            content.model.created_at.desc(),
+            content.model.id.desc(),
+        )
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
 
 
 @router.post("/{content_id}/view")
@@ -853,8 +951,70 @@ def get_related_contents(
         restrict_public_content_query(
             query,
             db,
-            current_user
+            current_user,
+        )
+        .order_by(
+            content.model.created_at.desc(),
+            content.model.id.desc(),
         )
         .limit(20)
         .all()
     )
+
+@router.put("/{content_id}/archive", response_model=ContentResponse)
+def archive_content(
+    content_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_roles(ADMIN_ROLES)),
+):
+    db_content = content.get(db, content_id)
+
+    if not db_content:
+        raise HTTPException(404, "Contenu introuvable")
+
+    db_content.status = "ARCHIVED"
+
+    db.commit()
+    db.refresh(db_content)
+
+    return db_content
+
+
+@router.put("/{content_id}/publish", response_model=ContentResponse)
+def publish_content(
+    content_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_roles(ADMIN_ROLES)),
+):
+    db_content = content.get(db, content_id)
+
+    if not db_content:
+        raise HTTPException(404, "Contenu introuvable")
+
+    db_content.status = "APPROVED"
+
+    db.commit()
+    db.refresh(db_content)
+
+    return db_content
+
+@router.get("/{content_id}", response_model=ContentResponse)
+def get_content(
+    content_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    db_content = content.get(db, content_id)
+
+    if not db_content:
+        raise HTTPException(status_code=404, detail="Contenu introuvable")
+
+    if db_content.status != "APPROVED" and current_user.role == "ELEVE":
+        raise HTTPException(
+            status_code=403,
+            detail="Ce contenu n'est pas encore disponible pour les élèves",
+        )
+    
+    require_content_access(db, current_user, db_content)
+
+    return db_content
