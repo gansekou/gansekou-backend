@@ -3,7 +3,7 @@
 
   "name": "gansekou-backend",
 
-  "main": "src/entry.py",
+  "main": "entry.py",
 
   "compatibility_date": "2026-08-16",
 
