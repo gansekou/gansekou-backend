@@ -2,7 +2,7 @@
 name = "gansekou-backend"
 version = "1.0.0"
 description = "Backend officiel de GANSEKOU"
-requires-python = ">=3.12"
+requires-python = ">=3.13"
 dependencies = [
     "fastapi==0.115.6",
     "pydantic==2.10.4",
