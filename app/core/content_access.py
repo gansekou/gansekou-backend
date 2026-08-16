@@ -55,7 +55,7 @@ def normalize_content_type(
 
     return CONTENT_TYPE_ALIASES.get(
         normalized,
-        "COURS",
+        normalized,
     )
 
 
