@@ -4,5 +4,13 @@
   "compatibility_date": "2026-08-16",
   "compatibility_flags": [
     "python_workers"
+  ],
+  "rules": [
+    {
+      "type": "CompiledPythonModule",
+      "globs": [
+        "**/*.py"
+      ]
+    }
   ]
 }
