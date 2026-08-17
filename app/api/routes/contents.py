@@ -108,7 +108,16 @@ def get_contents(
     db: Session = Depends(get_db),
     current_user=Depends(require_roles(ADMIN_ROLES)),
 ):
-    return content.get_all(db, skip=skip, limit=limit)
+    return (
+        db.query(content.model)
+        .order_by(
+            content.model.created_at.desc(),
+            content.model.id.desc(),
+        )
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
 
 @router.get(
     "/related-options",
