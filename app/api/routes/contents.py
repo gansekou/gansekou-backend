@@ -56,11 +56,15 @@ def restrict_public_content_query(query, db: Session, current_user):
     query = query.filter(
         content.model.content_type.in_(["COURS", "EXERCICE", "SUJET"])
     )
+
+    # L'élève ne reçoit que les contenus autorisés pour son niveau,
+    # mais les contenus PREMIUM restent visibles dans le catalogue.
     query = restrict_content_query_by_user(
         query,
         current_user,
         db,
     )
+
     return query
 
 
@@ -601,12 +605,9 @@ def get_contents_by_type(
             content.model.content_type == normalize_content_type(content_type),
         )
     )
+
     return (
-        restrict_public_content_query(
-            query,
-            db,
-            current_user,
-        )
+        query
         .order_by(
             content.model.created_at.desc(),
             content.model.id.desc(),
