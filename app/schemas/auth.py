@@ -14,12 +14,11 @@ class FirebaseLoginRequest(BaseModel):
 
 
 class EmailRegisterRequest(BaseModel):
-    firebase_uid: str
+    id_token: str
 
     nom: str
     prenom: str
 
-    email: EmailStr
     phone: str | None = None
 
     genre: str | None = None
