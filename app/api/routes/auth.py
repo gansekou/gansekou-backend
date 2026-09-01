@@ -1,6 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
+import logging
+
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+
 from app.database.session import get_db
 from app.services.firebase_service import verify_firebase_token
 from app.schemas.auth import (
@@ -24,6 +28,8 @@ from app.services.session_service import (
 router = APIRouter()
 
 SELF_REGISTER_ROLES = {"ELEVE"}
+
+logger = logging.getLogger(__name__)
 
 def create_device_session(
     db: Session,
@@ -207,53 +213,286 @@ def firebase_login(payload: FirebaseLoginRequest, db: Session = Depends(get_db))
 
 
 @router.post("/register-email", response_model=AuthResponse)
-def register_email(payload: EmailRegisterRequest, db: Session = Depends(get_db)):
-    role = validate_self_register_role(payload.role)
+def register_email(
+    payload: EmailRegisterRequest,
+    db: Session = Depends(get_db),
+):
+    try:
+        # ============================================================
+        # 1. VÉRIFICATION DE L'IDENTITÉ FIREBASE
+        # ============================================================
 
-    existing_uid = user.get_by_firebase_uid(db, payload.firebase_uid)
-    if existing_uid:
-        raise HTTPException(status_code=400, detail="Ce compte existe déjà")
+        try:
+            decoded = verify_firebase_token(payload.id_token)
 
-    existing_email = user.get_by_email(db, payload.email)
-    if existing_email:
-        raise HTTPException(status_code=400, detail="Cet email est déjà utilisé")
-
-    if payload.phone:
-        existing_phone = user.get_by_phone(db, payload.phone)
-        if existing_phone:
-            raise HTTPException(
-                status_code=400,
-                detail="Ce numéro de téléphone est déjà utilisé"
+        except Exception:
+            logger.exception(
+                "Échec de vérification du token Firebase"
             )
 
-    new_user_data = UserCreate(
-        firebase_uid=payload.firebase_uid,
-        nom=payload.nom,
-        prenom=payload.prenom,
-        genre=payload.genre,
-        email=payload.email,
-        phone=payload.phone,
-        age=payload.age,
-        role=role,
-        preferred_language=payload.preferred_language,
-    )
+            raise HTTPException(
+                status_code=401,
+                detail={
+                    "code": "INVALID_FIREBASE_TOKEN",
+                    "message": (
+                        "Votre session d'inscription est invalide "
+                        "ou expirée. Veuillez réessayer."
+                    ),
+                },
+            )
 
-    new_user = user.create_user(db, new_user_data)
+        firebase_uid = decoded.get("uid")
+        email = decoded.get("email")
 
-    refresh_token = create_device_session(
-        db,
-        new_user.id,
-        device_id=payload.device_id or "unknown",
-        device_name=payload.device_name,
-        platform=payload.platform,
-    )
-    
-    return {
-        "access_type": "firebase",
-        "is_new_user": True,
-        "user": new_user,
-        "refresh_token": refresh_token,
-    }
+        if not firebase_uid:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "code": "FIREBASE_UID_MISSING",
+                    "message": (
+                        "Impossible d'identifier votre compte."
+                    ),
+                },
+            )
+
+        if not email:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "code": "FIREBASE_EMAIL_MISSING",
+                    "message": (
+                        "Aucune adresse email valide n'est associée "
+                        "à votre compte."
+                    ),
+                },
+            )
+
+        # ============================================================
+        # 2. VALIDATION DU RÔLE
+        # ============================================================
+
+        role = validate_self_register_role(
+            payload.role
+        )
+
+        # ============================================================
+        # 3. RECHERCHE PAR FIREBASE UID
+        # ============================================================
+
+        existing_user = user.get_by_firebase_uid(
+            db,
+            firebase_uid,
+        )
+
+        # L'utilisateur existe déjà.
+        # On le retourne simplement.
+        if existing_user:
+
+            refresh_token = create_device_session(
+                db,
+                existing_user.id,
+                device_id=payload.device_id or "unknown",
+                device_name=payload.device_name,
+                platform=payload.platform,
+            )
+
+            return {
+                "access_type": "firebase",
+                "is_new_user": False,
+                "user": existing_user,
+                "refresh_token": refresh_token,
+            }
+
+        # ============================================================
+        # 4. RECHERCHE PAR EMAIL
+        # ============================================================
+
+        existing_email = user.get_by_email(
+            db,
+            email,
+        )
+
+        if existing_email:
+
+            # Compte existant sans Firebase UID.
+            # On peut lier ce compte à Firebase.
+            if not existing_email.firebase_uid:
+
+                existing_email.firebase_uid = firebase_uid
+
+                db.commit()
+                db.refresh(existing_email)
+
+                refresh_token = create_device_session(
+                    db,
+                    existing_email.id,
+                    device_id=payload.device_id or "unknown",
+                    device_name=payload.device_name,
+                    platform=payload.platform,
+                )
+
+                return {
+                    "access_type": "firebase",
+                    "is_new_user": False,
+                    "user": existing_email,
+                    "refresh_token": refresh_token,
+                }
+
+            # Email déjà associé à un autre UID Firebase.
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "EMAIL_ALREADY_EXISTS",
+                    "message": (
+                        "Cette adresse email est déjà associée "
+                        "à un autre compte."
+                    ),
+                },
+            )
+
+        # ============================================================
+        # 5. VÉRIFICATION DU NUMÉRO DE TÉLÉPHONE
+        # ============================================================
+
+        if payload.phone:
+
+            existing_phone = user.get_by_phone(
+                db,
+                payload.phone,
+            )
+
+            if existing_phone:
+
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "code": "PHONE_ALREADY_EXISTS",
+                        "message": (
+                            "Ce numéro de téléphone est déjà utilisé "
+                            "par un autre compte."
+                        ),
+                    },
+                )
+
+        # ============================================================
+        # 6. CRÉATION POSTGRESQL
+        # ============================================================
+
+        new_user_data = UserCreate(
+            firebase_uid=firebase_uid,
+            nom=payload.nom,
+            prenom=payload.prenom,
+            genre=payload.genre,
+            email=email,
+            phone=payload.phone,
+            age=payload.age,
+            role=role,
+            preferred_language=payload.preferred_language,
+        )
+
+        new_user = user.create_user(
+            db,
+            new_user_data,
+        )
+
+        # ============================================================
+        # 7. CRÉATION DE SESSION
+        # ============================================================
+
+        refresh_token = create_device_session(
+            db,
+            new_user.id,
+            device_id=payload.device_id or "unknown",
+            device_name=payload.device_name,
+            platform=payload.platform,
+        )
+
+        # ============================================================
+        # 8. INSCRIPTION TERMINÉE
+        # ============================================================
+
+        return {
+            "access_type": "firebase",
+            "is_new_user": True,
+            "user": new_user,
+            "refresh_token": refresh_token,
+        }
+
+    # ================================================================
+    # ERREURS CONTRÔLÉES
+    # ================================================================
+
+    except HTTPException:
+        raise
+
+    # ================================================================
+    # ERREURS SQL D'INTÉGRITÉ
+    # ================================================================
+
+    except IntegrityError:
+
+        db.rollback()
+
+        logger.exception(
+            "Erreur d'intégrité PostgreSQL lors de l'inscription"
+        )
+
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "DATABASE_CONFLICT",
+                "message": (
+                    "Certaines informations sont déjà utilisées "
+                    "par un autre compte."
+                ),
+            },
+        )
+
+    # ================================================================
+    # AUTRES ERREURS POSTGRESQL
+    # ================================================================
+
+    except SQLAlchemyError:
+
+        db.rollback()
+
+        logger.exception(
+            "Erreur PostgreSQL lors de l'inscription"
+        )
+
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "code": "DATABASE_ERROR",
+                "message": (
+                    "Le service rencontre temporairement une "
+                    "difficulté. Veuillez réessayer dans quelques instants."
+                ),
+            },
+        )
+
+    # ================================================================
+    # ERREUR INATTENDUE
+    # ================================================================
+
+    except Exception:
+
+        db.rollback()
+
+        logger.exception(
+            "Erreur inattendue lors de l'inscription"
+        )
+
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "code": "REGISTRATION_ERROR",
+                "message": (
+                    "Une erreur inattendue est survenue lors "
+                    "de la création de votre compte."
+                ),
+            },
+        )
 
 
 @router.post(
