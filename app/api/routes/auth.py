@@ -139,14 +139,30 @@ def firebase_login(payload: FirebaseLoginRequest, db: Session = Depends(get_db))
         }
 
     existing_email = user.get_by_email(db, email) if email else None
+
     if existing_email:
-        existing_email.firebase_uid = firebase_uid
     
-        if picture and not existing_email.profile_url:
-            existing_email.profile_url = picture
+        if existing_email.firebase_uid:
+            if existing_email.firebase_uid != firebase_uid:
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "code": "EMAIL_ALREADY_LINKED",
+                        "message": (
+                            "Cette adresse email est déjà associée "
+                            "à un autre compte GANSEKOU."
+                        ),
+                    },
+                )
     
-        db.commit()
-        db.refresh(existing_email)
+        else:
+            existing_email.firebase_uid = firebase_uid
+    
+            if picture and not existing_email.profile_url:
+                existing_email.profile_url = picture
+    
+            db.commit()
+            db.refresh(existing_email)
     
         refresh_token = create_device_session(
             db,
@@ -162,7 +178,6 @@ def firebase_login(payload: FirebaseLoginRequest, db: Session = Depends(get_db))
             "user": existing_email,
             "refresh_token": refresh_token,
         }
-
     social_providers = ["google.com", "facebook.com", "password"]
 
     if provider not in social_providers:
@@ -219,7 +234,7 @@ def register_email(
 ):
     try:
         # ============================================================
-        # 1. VÉRIFICATION DE L'IDENTITÉ FIREBASE
+        # 1. VÉRIFIER LE TOKEN FIREBASE
         # ============================================================
 
         try:
@@ -227,7 +242,8 @@ def register_email(
 
         except Exception:
             logger.exception(
-                "Échec de vérification du token Firebase"
+                "Erreur de vérification du token Firebase "
+                "pendant l'inscription"
             )
 
             raise HTTPException(
@@ -242,41 +258,42 @@ def register_email(
             )
 
         firebase_uid = decoded.get("uid")
-        email = decoded.get("email")
+        firebase_email = decoded.get("email")
 
         if not firebase_uid:
             raise HTTPException(
-                status_code=400,
+                status_code=401,
                 detail={
                     "code": "FIREBASE_UID_MISSING",
                     "message": (
-                        "Impossible d'identifier votre compte."
+                        "Impossible d'identifier votre compte Firebase."
                     ),
                 },
             )
 
-        if not email:
+        if not firebase_email:
             raise HTTPException(
                 status_code=400,
                 detail={
                     "code": "FIREBASE_EMAIL_MISSING",
                     "message": (
-                        "Aucune adresse email valide n'est associée "
-                        "à votre compte."
+                        "Aucune adresse email n'est associée "
+                        "à votre compte Firebase."
                     ),
                 },
             )
+
+        # Email provenant de Firebase = source de vérité
+        email = firebase_email.strip().lower()
 
         # ============================================================
         # 2. VALIDATION DU RÔLE
         # ============================================================
 
-        role = validate_self_register_role(
-            payload.role
-        )
+        role = validate_self_register_role(payload.role)
 
         # ============================================================
-        # 3. RECHERCHE PAR FIREBASE UID
+        # 3. CHERCHER PAR FIREBASE UID
         # ============================================================
 
         existing_user = user.get_by_firebase_uid(
@@ -284,10 +301,10 @@ def register_email(
             firebase_uid,
         )
 
-        # L'utilisateur existe déjà.
-        # On le retourne simplement.
         if existing_user:
 
+            # Le compte PostgreSQL existe déjà.
+            # Ce n'est PAS une erreur.
             refresh_token = create_device_session(
                 db,
                 existing_user.id,
@@ -304,7 +321,7 @@ def register_email(
             }
 
         # ============================================================
-        # 4. RECHERCHE PAR EMAIL
+        # 4. CHERCHER PAR EMAIL
         # ============================================================
 
         existing_email = user.get_by_email(
@@ -314,8 +331,10 @@ def register_email(
 
         if existing_email:
 
-            # Compte existant sans Firebase UID.
-            # On peut lier ce compte à Firebase.
+            # --------------------------------------------------------
+            # Cas : compte PostgreSQL existant mais non lié à Firebase
+            # --------------------------------------------------------
+
             if not existing_email.firebase_uid:
 
                 existing_email.firebase_uid = firebase_uid
@@ -338,27 +357,32 @@ def register_email(
                     "refresh_token": refresh_token,
                 }
 
-            # Email déjà associé à un autre UID Firebase.
+            # --------------------------------------------------------
+            # L'email est déjà lié à un autre compte Firebase
+            # --------------------------------------------------------
+
             raise HTTPException(
                 status_code=409,
                 detail={
-                    "code": "EMAIL_ALREADY_EXISTS",
+                    "code": "EMAIL_ALREADY_LINKED",
                     "message": (
                         "Cette adresse email est déjà associée "
-                        "à un autre compte."
+                        "à un autre compte GANSEKOU."
                     ),
                 },
             )
 
         # ============================================================
-        # 5. VÉRIFICATION DU NUMÉRO DE TÉLÉPHONE
+        # 5. VÉRIFIER LE TÉLÉPHONE
         # ============================================================
 
-        if payload.phone:
+        phone = payload.phone.strip() if payload.phone else None
+
+        if phone:
 
             existing_phone = user.get_by_phone(
                 db,
-                payload.phone,
+                phone,
             )
 
             if existing_phone:
@@ -375,16 +399,16 @@ def register_email(
                 )
 
         # ============================================================
-        # 6. CRÉATION POSTGRESQL
+        # 6. CRÉER LE PROFIL GANSEKOU
         # ============================================================
 
         new_user_data = UserCreate(
             firebase_uid=firebase_uid,
-            nom=payload.nom,
-            prenom=payload.prenom,
+            nom=payload.nom.strip(),
+            prenom=payload.prenom.strip(),
             genre=payload.genre,
             email=email,
-            phone=payload.phone,
+            phone=phone,
             age=payload.age,
             role=role,
             preferred_language=payload.preferred_language,
@@ -396,7 +420,7 @@ def register_email(
         )
 
         # ============================================================
-        # 7. CRÉATION DE SESSION
+        # 7. CRÉER LA SESSION
         # ============================================================
 
         refresh_token = create_device_session(
@@ -408,7 +432,7 @@ def register_email(
         )
 
         # ============================================================
-        # 8. INSCRIPTION TERMINÉE
+        # 8. SUCCÈS
         # ============================================================
 
         return {
@@ -419,14 +443,14 @@ def register_email(
         }
 
     # ================================================================
-    # ERREURS CONTRÔLÉES
+    # ERREURS VOLONTAIRES
     # ================================================================
 
     except HTTPException:
         raise
 
     # ================================================================
-    # ERREURS SQL D'INTÉGRITÉ
+    # CONFLIT BASE DE DONNÉES
     # ================================================================
 
     except IntegrityError:
@@ -434,7 +458,7 @@ def register_email(
         db.rollback()
 
         logger.exception(
-            "Erreur d'intégrité PostgreSQL lors de l'inscription"
+            "Conflit d'intégrité PostgreSQL pendant l'inscription"
         )
 
         raise HTTPException(
@@ -449,7 +473,7 @@ def register_email(
         )
 
     # ================================================================
-    # AUTRES ERREURS POSTGRESQL
+    # ERREUR POSTGRESQL
     # ================================================================
 
     except SQLAlchemyError:
@@ -457,7 +481,7 @@ def register_email(
         db.rollback()
 
         logger.exception(
-            "Erreur PostgreSQL lors de l'inscription"
+            "Erreur PostgreSQL pendant l'inscription"
         )
 
         raise HTTPException(
@@ -465,8 +489,8 @@ def register_email(
             detail={
                 "code": "DATABASE_ERROR",
                 "message": (
-                    "Le service rencontre temporairement une "
-                    "difficulté. Veuillez réessayer dans quelques instants."
+                    "Le serveur rencontre actuellement une difficulté "
+                    "pour créer votre compte. Veuillez réessayer."
                 ),
             },
         )
@@ -480,7 +504,7 @@ def register_email(
         db.rollback()
 
         logger.exception(
-            "Erreur inattendue lors de l'inscription"
+            "Erreur inattendue pendant l'inscription"
         )
 
         raise HTTPException(
@@ -488,8 +512,8 @@ def register_email(
             detail={
                 "code": "REGISTRATION_ERROR",
                 "message": (
-                    "Une erreur inattendue est survenue lors "
-                    "de la création de votre compte."
+                    "Une erreur inattendue est survenue pendant "
+                    "la création de votre compte."
                 ),
             },
         )
