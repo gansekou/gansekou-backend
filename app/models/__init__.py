@@ -19,7 +19,7 @@ from app.models.ai_usage_log import AIUsageLog
 
 from app.models.teacher_subject import TeacherSubject
 
-from app.models.quiz import Quiz
+from app.models.quiz import Quiz, QuizLevel
 from app.models.quiz_question import QuizQuestion
 from app.models.quiz_choice import QuizChoice
 from app.models.quiz_attempt import QuizAttempt
