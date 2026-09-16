@@ -29,5 +29,10 @@ class Level(Base):
         back_populates="levels",
     )
 
+    quiz_levels = relationship(
+        "QuizLevel",
+        back_populates="level",
+    )
+
 
 
