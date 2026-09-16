@@ -16,6 +16,32 @@ from sqlalchemy.dialects.postgresql import UUID
 from app.database.base import Base
 
 
+class QuizLevel(Base):
+    __tablename__ = "quiz_levels"
+
+    quiz_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("quizzes.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+
+    level_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("levels.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+
+    quiz = relationship(
+        "Quiz",
+        back_populates="quiz_levels",
+    )
+
+    level = relationship(
+        "Level",
+        back_populates="quiz_levels",
+    )
+
+
 class Quiz(Base):
     __tablename__ = "quizzes"
 
@@ -53,10 +79,14 @@ class Quiz(Base):
         index=True
     )
 
-    level_id: Mapped[uuid.UUID] = mapped_column(
+    # ---------------------------------------------------------
+    # COMPATIBILITÉ ANCIEN SYSTÈME
+    # ---------------------------------------------------------
+    # Conservé temporairement pour les anciens quiz.
+    level_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("levels.id"),
-        nullable=False,
+        nullable=True,
         index=True
     )
 
@@ -139,17 +169,44 @@ class Quiz(Base):
         onupdate=func.now()
     )
 
+    # ---------------------------------------------------------
+    # RELATIONS
+    # ---------------------------------------------------------
+
     author = relationship("User")
+
     subject = relationship("Subject")
-    level = relationship("Level")
-    content = relationship("Content", foreign_keys=[content_id])
-    course = relationship("Content", foreign_keys=[course_id])
+
+    # Ancienne relation conservée pour compatibilité
+    level = relationship(
+        "Level",
+        foreign_keys=[level_id],
+    )
+
+    # Nouvelle relation : un quiz peut avoir plusieurs niveaux
+    quiz_levels = relationship(
+        "QuizLevel",
+        back_populates="quiz",
+        cascade="all, delete-orphan",
+    )
+
+    content = relationship(
+        "Content",
+        foreign_keys=[content_id],
+    )
+
+    course = relationship(
+        "Content",
+        foreign_keys=[course_id],
+    )
+
     questions = relationship(
         "QuizQuestion",
         back_populates="quiz",
         cascade="all, delete-orphan",
         order_by="QuizQuestion.order_index",
     )
+
     attempts = relationship(
         "QuizAttempt",
         back_populates="quiz",
