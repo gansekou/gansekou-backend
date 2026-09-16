@@ -40,7 +40,6 @@ def create_device_session(
 ):
     refresh_token = create_refresh_token()
 
-    # Rechercher une session existante pour cet utilisateur et cet appareil
     session = (
         db.query(DeviceSession)
         .filter(
@@ -51,7 +50,6 @@ def create_device_session(
     )
 
     if session:
-        # Mise à jour de la session existante
         session.device_name = device_name
         session.platform = platform
         session.refresh_token_hash = hash_token(refresh_token)
@@ -60,7 +58,6 @@ def create_device_session(
         session.revoked = False
 
     else:
-        # Création d'une nouvelle session
         session = DeviceSession(
             user_id=user_id,
             device_id=device_id,
@@ -74,7 +71,7 @@ def create_device_session(
 
         db.add(session)
 
-    db.commit()
+    db.flush()
     db.refresh(session)
 
     return refresh_token
@@ -300,23 +297,56 @@ def register_email(
             db,
             firebase_uid,
         )
-
+        
         if existing_user:
-
-            # Le compte PostgreSQL existe déjà.
-            # Ce n'est PAS une erreur.
+            logger.info(
+                "Inscription récupérée : profil existant "
+                "firebase_uid=%s user_id=%s",
+                firebase_uid,
+                existing_user.id,
+            )
+        
+            # Mettre à jour les informations éventuellement manquantes.
+            changed = False
+        
+            if not existing_user.nom and payload.nom.strip():
+                existing_user.nom = payload.nom.strip()
+                changed = True
+        
+            if not existing_user.prenom and payload.prenom.strip():
+                existing_user.prenom = payload.prenom.strip()
+                changed = True
+        
+            if not existing_user.phone and payload.phone:
+                existing_user.phone = payload.phone.strip()
+                changed = True
+        
+            if existing_user.genre is None and payload.genre:
+                existing_user.genre = payload.genre
+                changed = True
+        
+            if existing_user.age is None and payload.age is not None:
+                existing_user.age = payload.age
+                changed = True
+        
+            if changed:
+                db.flush()
+        
             refresh_token = create_device_session(
                 db,
-                existing_user.id,
+                new_user.id,
                 device_id=payload.device_id or "unknown",
                 device_name=payload.device_name,
                 platform=payload.platform,
             )
-
+            
+            db.commit()
+            db.refresh(new_user)
+            
             return {
                 "access_type": "firebase",
-                "is_new_user": False,
-                "user": existing_user,
+                "is_new_user": True,
+                "user": new_user,
                 "refresh_token": refresh_token,
             }
 
@@ -339,7 +369,7 @@ def register_email(
 
                 existing_email.firebase_uid = firebase_uid
 
-                db.commit()
+                db.flush()
                 db.refresh(existing_email)
 
                 refresh_token = create_device_session(
