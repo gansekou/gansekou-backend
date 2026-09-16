@@ -15,7 +15,9 @@ from app.core.content_access import (
 
 from app.models.user import User
 from app.models.content import Content
-from app.models.quiz import Quiz
+from app.models.content_level import ContentLevel
+from app.models.level import Level
+from app.models.quiz import Quiz, QuizLevel
 from app.models.quiz_question import QuizQuestion
 from app.models.quiz_choice import QuizChoice
 from app.models.quiz_attempt import QuizAttempt
@@ -90,30 +92,213 @@ def require_quiz_management(user: User, quiz: Quiz):
         raise HTTPException(403, "Vous ne pouvez modifier que vos propres quiz")
 
 
-def apply_course_to_quiz_payload(db: Session, user: User, payload):
-    if not payload.course_id:
-        if user.role in TEACHER_CREATOR_ROLES:
-            subject_ids = set(get_teacher_subject_ids(db, user))
-            if payload.subject_id not in subject_ids:
-                raise HTTPException(403, "Cette matiere ne fait pas partie de vos matieres enseignees.")
-        return payload.subject_id, payload.level_id, None
+def get_course_level_ids(
+    db: Session,
+    course: Content,
+) -> set[uuid.UUID]:
+    """
+    Retourne tous les niveaux associés à un cours.
+    """
 
-    course = db.query(Content).filter(Content.id == payload.course_id).first()
+    rows = (
+        db.query(ContentLevel.level_id)
+        .filter(
+            ContentLevel.content_id == course.id
+        )
+        .all()
+    )
+
+    return {
+        row[0]
+        for row in rows
+    }
+
+
+def apply_course_to_quiz_payload(
+    db: Session,
+    user: User,
+    payload,
+):
+    """
+    Résout :
+
+    - la matière ;
+    - les niveaux ;
+    - le cours lié.
+
+    Un quiz peut avoir 1 ou plusieurs niveaux.
+
+    Si un cours est lié et qu'aucun niveau précis
+    n'est fourni, tous les niveaux du cours sont
+    automatiquement associés au quiz.
+    """
+
+    payload_level_ids = set(
+        getattr(
+            payload,
+            "level_ids",
+            []
+        ) or []
+    )
+
+    # ============================================================
+    # SANS COURS
+    # ============================================================
+
+    if not payload.course_id:
+
+        if user.role in TEACHER_CREATOR_ROLES:
+
+            subject_ids = set(
+                get_teacher_subject_ids(
+                    db,
+                    user,
+                )
+            )
+
+            if payload.subject_id not in subject_ids:
+                raise HTTPException(
+                    403,
+                    "Cette matiere ne fait pas partie de vos matieres enseignees.",
+                )
+
+        if not payload_level_ids:
+            raise HTTPException(
+                400,
+                "Au moins un niveau doit etre associe au quiz.",
+            )
+
+        # Vérifier que les niveaux existent
+        existing_level_ids = {
+            row[0]
+            for row in (
+                db.query(Level.id)
+                .filter(
+                    Level.id.in_(
+                        payload_level_ids
+                    )
+                )
+                .all()
+            )
+        }
+
+        if existing_level_ids != payload_level_ids:
+            raise HTTPException(
+                400,
+                "Un ou plusieurs niveaux selectionnes sont invalides.",
+            )
+
+        return (
+            payload.subject_id,
+            payload_level_ids,
+            None,
+        )
+
+    # ============================================================
+    # AVEC COURS
+    # ============================================================
+
+    course = (
+        db.query(Content)
+        .filter(
+            Content.id == payload.course_id
+        )
+        .first()
+    )
+
     if not course:
-        raise HTTPException(404, "Cours lie introuvable")
+        raise HTTPException(
+            404,
+            "Cours lie introuvable",
+        )
+
     if course.content_type != "COURS":
-        raise HTTPException(400, "Le quiz doit etre lie a un contenu de type COURS")
-    require_content_allowed_for_user(db, user, course)
-    return course.subject_id, course.level_id, course.id
+        raise HTTPException(
+            400,
+            "Le quiz doit etre lie a un contenu de type COURS",
+        )
+
+    require_content_allowed_for_user(
+        db,
+        user,
+        course,
+    )
+
+    course_level_ids = get_course_level_ids(
+        db,
+        course,
+    )
+
+    if not course_level_ids:
+        raise HTTPException(
+            400,
+            "Le cours lie ne possede aucun niveau.",
+        )
+
+    # ============================================================
+    # NIVEAUX FOURNIS
+    # ============================================================
+
+    if payload_level_ids:
+
+        invalid_level_ids = (
+            payload_level_ids
+            - course_level_ids
+        )
+
+        if invalid_level_ids:
+            raise HTTPException(
+                400,
+                "Un ou plusieurs niveaux selectionnes ne sont pas associes au cours.",
+            )
+
+        level_ids = payload_level_ids
+
+    else:
+
+        # Par défaut :
+        # tous les niveaux du cours
+        level_ids = course_level_ids
+
+    return (
+        course.subject_id,
+        level_ids,
+        course.id,
+    )
 
 
 def quiz_with_questions_query(db: Session):
-    return db.query(Quiz).options(
-        selectinload(Quiz.questions).selectinload(QuizQuestion.choices),
-        selectinload(Quiz.author),
-        selectinload(Quiz.subject),
-        selectinload(Quiz.level),
-        selectinload(Quiz.course),
+    return (
+        db.query(Quiz)
+        .options(
+            selectinload(
+                Quiz.questions
+            ).selectinload(
+                QuizQuestion.choices
+            ),
+
+            selectinload(
+                Quiz.author
+            ),
+
+            selectinload(
+                Quiz.subject
+            ),
+
+            selectinload(
+                Quiz.level
+            ),
+
+            selectinload(
+                Quiz.quiz_levels
+            ).selectinload(
+                QuizLevel.level
+            ),
+
+            selectinload(
+                Quiz.course
+            ),
+        )
     )
 
 
@@ -216,38 +401,99 @@ def build_attempt_result(db: Session, attempt: QuizAttempt) -> dict:
     }
 
 
-@router.post("/", response_model=QuizResponse)
+@router.post(
+    "/",
+    response_model=QuizResponse,
+)
 def create_quiz(
     payload: QuizCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(
+        get_current_user
+    ),
 ):
-    require_teacher_or_admin(current_user)
+    require_teacher_or_admin(
+        current_user
+    )
 
-    subject_id, level_id, course_id = apply_course_to_quiz_payload(db, current_user, payload)
+    (
+        subject_id,
+        level_ids,
+        course_id,
+    ) = apply_course_to_quiz_payload(
+        db,
+        current_user,
+        payload,
+    )
 
     quiz = Quiz(
         author_id=current_user.id,
+
         title=payload.title,
         description=payload.description,
+
         course_id=course_id,
         content_id=course_id,
+
         subject_id=subject_id,
-        level_id=level_id,
+
+        # Compatibilité ancienne architecture
+        level_id=sorted(
+            level_ids,
+            key=str,
+        )[0],
+
         language=payload.language,
-        difficulty_level=payload.difficulty_level,
+
+        difficulty_level=(
+            payload.difficulty_level
+        ),
+
         quiz_type=payload.quiz_type,
+
         is_premium=payload.is_premium,
-        is_randomized=payload.is_randomized,
+
+        is_randomized=(
+            payload.is_randomized
+        ),
+
         allow_retry=payload.allow_retry,
-        passing_score=payload.passing_score,
-        estimated_duration_minutes=payload.estimated_duration_minutes,
+
+        passing_score=(
+            payload.passing_score
+        ),
+
+        estimated_duration_minutes=(
+            payload.estimated_duration_minutes
+        ),
+
         status="PUBLISHED",
     )
 
     db.add(quiz)
+
+    # Obtenir l'ID du quiz
+    db.flush()
+
+    # ============================================================
+    # ASSOCIATION DE TOUS LES NIVEAUX
+    # ============================================================
+
+    for level_id in level_ids:
+
+        db.add(
+            QuizLevel(
+                quiz_id=quiz.id,
+                level_id=level_id,
+            )
+        )
+
     db.commit()
-    return get_quiz_or_404(db, quiz.id)
+
+    return get_quiz_or_404(
+        db,
+        quiz.id,
+    )
 
 
 @router.get("/", response_model=list[QuizResponse])
@@ -306,58 +552,155 @@ def get_attempt_result(
 def generate_quiz_with_ai(
     payload: AIQuizGenerateRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(
+        get_current_user
+    ),
 ):
-    require_teacher_or_admin(current_user)
-    subject_id, level_id, course_id = apply_course_to_quiz_payload(db, current_user, payload)
-    generated = generate_ai_quiz(payload)
+    require_teacher_or_admin(
+        current_user
+    )
+
+    (
+        subject_id,
+        level_ids,
+        course_id,
+    ) = apply_course_to_quiz_payload(
+        db,
+        current_user,
+        payload,
+    )
+
+    generated = generate_ai_quiz(
+        payload
+    )
 
     quiz = Quiz(
         author_id=current_user.id,
+
         course_id=course_id,
         content_id=course_id,
+
         subject_id=subject_id,
-        level_id=level_id,
+
+        # Compatibilité
+        level_id=sorted(
+            level_ids,
+            key=str,
+        )[0],
+
         title=generated["title"],
-        description=generated["description"],
+
+        description=generated[
+            "description"
+        ],
+
         language=payload.language,
-        difficulty_level=payload.difficulty_level,
+
+        difficulty_level=(
+            payload.difficulty_level
+        ),
+
         quiz_type="QCM",
+
         status="PUBLISHED",
-        total_questions=len(generated["questions"]),
+
+        total_questions=len(
+            generated["questions"]
+        ),
     )
 
     db.add(quiz)
+
+    db.flush()
+
+    # ============================================================
+    # NIVEAUX
+    # ============================================================
+
+    for level_id in level_ids:
+
+        db.add(
+            QuizLevel(
+                quiz_id=quiz.id,
+                level_id=level_id,
+            )
+        )
+
     db.commit()
+
     db.refresh(quiz)
 
-    for index, generated_question in enumerate(generated["questions"]):
+    # ============================================================
+    # QUESTIONS
+    # ============================================================
+
+    for index, generated_question in enumerate(
+        generated["questions"]
+    ):
+
         question = QuizQuestion(
             quiz_id=quiz.id,
-            question_text=generated_question["question_text"],
-            explanation=generated_question["explanation"],
-            points=generated_question["points"],
+
+            question_text=(
+                generated_question[
+                    "question_text"
+                ]
+            ),
+
+            explanation=(
+                generated_question[
+                    "explanation"
+                ]
+            ),
+
+            points=(
+                generated_question[
+                    "points"
+                ]
+            ),
+
             order_index=index,
         )
-        db.add(question)
-        db.commit()
-        db.refresh(question)
 
-        for generated_choice in generated_question["choices"]:
-            db.add(QuizChoice(
-                question_id=question.id,
-                choice_text=generated_choice["choice_text"],
-                is_correct=generated_choice["is_correct"],
-            ))
+        db.add(question)
+
+        db.flush()
+
+        for generated_choice in (
+            generated_question[
+                "choices"
+            ]
+        ):
+
+            db.add(
+                QuizChoice(
+                    question_id=question.id,
+
+                    choice_text=(
+                        generated_choice[
+                            "choice_text"
+                        ]
+                    ),
+
+                    is_correct=(
+                        generated_choice[
+                            "is_correct"
+                        ]
+                    ),
+                )
+            )
 
     db.commit()
 
     return {
         "message": "Quiz IA genere avec succes",
-        "quiz_id": quiz.id,
-        "total_questions": quiz.total_questions,
-    }
 
+        "quiz_id": quiz.id,
+
+        "total_questions": (
+            quiz.total_questions
+        ),
+    }
 
 @router.get("/by-course/{course_id}", response_model=list[QuizResponse])
 def get_quizzes_by_course(
@@ -493,41 +836,266 @@ def get_quiz_for_management(
     return quiz
 
 
-@router.put("/{quiz_id}", response_model=QuizManageResponse)
+@router.put(
+    "/{quiz_id}",
+    response_model=QuizManageResponse,
+)
 def update_quiz(
     quiz_id: uuid.UUID,
     payload: QuizUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(
+        get_current_user
+    ),
 ):
-    quiz = get_quiz_or_404(db, quiz_id)
-    require_quiz_management(current_user, quiz)
+    quiz = get_quiz_or_404(
+        db,
+        quiz_id,
+    )
 
-    values = payload.model_dump(exclude_unset=True)
-    if "status" in values and not is_admin(current_user):
-        raise HTTPException(403, "Seule l'administration peut changer le statut")
+    require_quiz_management(
+        current_user,
+        quiz,
+    )
+
+    values = payload.model_dump(
+        exclude_unset=True
+    )
+
+    # ============================================================
+    # STATUT
+    # ============================================================
+
+    if (
+        "status" in values
+        and not is_admin(current_user)
+    ):
+        raise HTTPException(
+            403,
+            "Seule l'administration peut changer le statut",
+        )
+
+    # ============================================================
+    # NIVEAUX
+    # ============================================================
+
+    requested_level_ids = values.pop(
+        "level_ids",
+        None,
+    )
+
+    legacy_level_id = values.pop(
+        "level_id",
+        None,
+    )
+
+    if (
+        requested_level_ids is None
+        and legacy_level_id is not None
+    ):
+        requested_level_ids = [
+            legacy_level_id
+        ]
+
+    # ============================================================
+    # COURS
+    # ============================================================
+
     if "course_id" in values:
-        if values["course_id"] is None:
+
+        course_id = values[
+            "course_id"
+        ]
+
+        # --------------------------------------------------------
+        # Retirer le cours
+        # --------------------------------------------------------
+
+        if course_id is None:
+
             quiz.course_id = None
             quiz.content_id = None
-            values.pop("course_id")
+
+            values.pop(
+                "course_id"
+            )
+
+            if requested_level_ids is None:
+
+                requested_level_ids = (
+                    [
+                        quiz.level_id
+                    ]
+                    if quiz.level_id
+                    else []
+                )
+
+        # --------------------------------------------------------
+        # Nouveau cours
+        # --------------------------------------------------------
+
         else:
-            course = db.query(Content).filter(Content.id == values["course_id"]).first()
+
+            course = (
+                db.query(Content)
+                .filter(
+                    Content.id == course_id
+                )
+                .first()
+            )
+
             if not course:
-                raise HTTPException(404, "Cours lie introuvable")
+                raise HTTPException(
+                    404,
+                    "Cours lie introuvable",
+                )
+
             if course.content_type != "COURS":
-                raise HTTPException(400, "Le quiz doit etre lie a un contenu de type COURS")
-            require_content_allowed_for_user(db, current_user, course)
+                raise HTTPException(
+                    400,
+                    "Le quiz doit etre lie a un contenu de type COURS",
+                )
+
+            require_content_allowed_for_user(
+                db,
+                current_user,
+                course,
+            )
+
+            course_level_ids = (
+                get_course_level_ids(
+                    db,
+                    course,
+                )
+            )
+
+            if not course_level_ids:
+                raise HTTPException(
+                    400,
+                    "Le cours lie ne possede aucun niveau.",
+                )
+
+            # Si aucun niveau n'est spécifié,
+            # reprendre tous les niveaux du cours.
+            if requested_level_ids is None:
+
+                requested_level_ids = list(
+                    course_level_ids
+                )
+
+            else:
+
+                requested_level_ids = list(
+                    dict.fromkeys(
+                        requested_level_ids
+                    )
+                )
+
+                invalid_level_ids = (
+                    set(requested_level_ids)
+                    - course_level_ids
+                )
+
+                if invalid_level_ids:
+                    raise HTTPException(
+                        400,
+                        "Un ou plusieurs niveaux selectionnes ne sont pas associes au cours.",
+                    )
+
             values["course_id"] = course.id
             values["content_id"] = course.id
-            values["subject_id"] = course.subject_id
-            values["level_id"] = course.level_id
+            values["subject_id"] = (
+                course.subject_id
+            )
+
+    # ============================================================
+    # VALIDATION DES NIVEAUX
+    # ============================================================
+
+    if requested_level_ids is not None:
+
+        requested_level_ids = list(
+            dict.fromkeys(
+                requested_level_ids
+            )
+        )
+
+        if not requested_level_ids:
+            raise HTTPException(
+                400,
+                "Au moins un niveau doit etre associe au quiz.",
+            )
+
+        existing_level_ids = {
+            row[0]
+            for row in (
+                db.query(Level.id)
+                .filter(
+                    Level.id.in_(
+                        requested_level_ids
+                    )
+                )
+                .all()
+            )
+        }
+
+        if (
+            existing_level_ids
+            != set(requested_level_ids)
+        ):
+            raise HTTPException(
+                400,
+                "Un ou plusieurs niveaux selectionnes sont invalides.",
+            )
+
+        # --------------------------------------------------------
+        # Synchronisation quiz_levels
+        # --------------------------------------------------------
+
+        (
+            db.query(QuizLevel)
+            .filter(
+                QuizLevel.quiz_id
+                == quiz.id
+            )
+            .delete(
+                synchronize_session=False
+            )
+        )
+
+        for level_id in (
+            requested_level_ids
+        ):
+
+            db.add(
+                QuizLevel(
+                    quiz_id=quiz.id,
+                    level_id=level_id,
+                )
+            )
+
+        # Compatibilité ancienne colonne
+        quiz.level_id = (
+            requested_level_ids[0]
+        )
+
+    # ============================================================
+    # AUTRES CHAMPS
+    # ============================================================
 
     for field, value in values.items():
-        setattr(quiz, field, value)
+        setattr(
+            quiz,
+            field,
+            value,
+        )
 
     db.commit()
-    return get_quiz_or_404(db, quiz.id)
+
+    return get_quiz_or_404(
+        db,
+        quiz.id,
+    )
 
 
 @router.delete("/{quiz_id}", response_model=QuizManageResponse)
