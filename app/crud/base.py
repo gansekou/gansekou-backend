@@ -21,7 +21,7 @@ class CRUDBase(Generic[ModelType]):
         db_obj = self.model(**obj_data)
 
         db.add(db_obj)
-        db.commit()
+        db.flush()
         db.refresh(db_obj)
 
         return db_obj
