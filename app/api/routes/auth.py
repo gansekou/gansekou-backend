@@ -283,6 +283,12 @@ def register_email(
         # Email provenant de Firebase = source de vérité
         email = firebase_email.strip().lower()
 
+        logger.info(
+            "Début inscription email firebase_uid=%s email=%s",
+            firebase_uid,
+            email,
+        )
+
         # ============================================================
         # 2. VALIDATION DU RÔLE
         # ============================================================
@@ -297,56 +303,63 @@ def register_email(
             db,
             firebase_uid,
         )
-        
+
         if existing_user:
             logger.info(
-                "Inscription récupérée : profil existant "
+                "Profil GANSEKOU existant trouvé "
                 "firebase_uid=%s user_id=%s",
                 firebase_uid,
                 existing_user.id,
             )
-        
-            # Mettre à jour les informations éventuellement manquantes.
+
             changed = False
-        
+
             if not existing_user.nom and payload.nom.strip():
                 existing_user.nom = payload.nom.strip()
                 changed = True
-        
+
             if not existing_user.prenom and payload.prenom.strip():
                 existing_user.prenom = payload.prenom.strip()
                 changed = True
-        
+
             if not existing_user.phone and payload.phone:
                 existing_user.phone = payload.phone.strip()
                 changed = True
-        
+
             if existing_user.genre is None and payload.genre:
                 existing_user.genre = payload.genre
                 changed = True
-        
+
             if existing_user.age is None and payload.age is not None:
                 existing_user.age = payload.age
                 changed = True
-        
+
             if changed:
                 db.flush()
-        
+
             refresh_token = create_device_session(
                 db,
-                new_user.id,
+                existing_user.id,
                 device_id=payload.device_id or "unknown",
                 device_name=payload.device_name,
                 platform=payload.platform,
             )
-            
+
+            # IMPORTANT :
+            # sauvegarder les modifications et la session
             db.commit()
-            db.refresh(new_user)
-            
+            db.refresh(existing_user)
+
+            logger.info(
+                "Profil existant récupéré avec succès "
+                "user_id=%s",
+                existing_user.id,
+            )
+
             return {
                 "access_type": "firebase",
-                "is_new_user": True,
-                "user": new_user,
+                "is_new_user": False,
+                "user": existing_user,
                 "refresh_token": refresh_token,
             }
 
@@ -362,7 +375,7 @@ def register_email(
         if existing_email:
 
             # --------------------------------------------------------
-            # Cas : compte PostgreSQL existant mais non lié à Firebase
+            # Cas : utilisateur PostgreSQL existant mais non lié
             # --------------------------------------------------------
 
             if not existing_email.firebase_uid:
@@ -370,7 +383,6 @@ def register_email(
                 existing_email.firebase_uid = firebase_uid
 
                 db.flush()
-                db.refresh(existing_email)
 
                 refresh_token = create_device_session(
                     db,
@@ -378,6 +390,17 @@ def register_email(
                     device_id=payload.device_id or "unknown",
                     device_name=payload.device_name,
                     platform=payload.platform,
+                )
+
+                # IMPORTANT
+                db.commit()
+                db.refresh(existing_email)
+
+                logger.info(
+                    "Profil PostgreSQL existant lié à Firebase "
+                    "user_id=%s firebase_uid=%s",
+                    existing_email.id,
+                    firebase_uid,
                 )
 
                 return {
@@ -388,19 +411,40 @@ def register_email(
                 }
 
             # --------------------------------------------------------
-            # L'email est déjà lié à un autre compte Firebase
+            # L'email est déjà lié à un autre Firebase UID
             # --------------------------------------------------------
 
-            raise HTTPException(
-                status_code=409,
-                detail={
-                    "code": "EMAIL_ALREADY_LINKED",
-                    "message": (
-                        "Cette adresse email est déjà associée "
-                        "à un autre compte GANSEKOU."
-                    ),
-                },
+            if existing_email.firebase_uid != firebase_uid:
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "code": "EMAIL_ALREADY_LINKED",
+                        "message": (
+                            "Cette adresse email est déjà associée "
+                            "à un autre compte GANSEKOU."
+                        ),
+                    },
+                )
+
+            # Normalement ce cas est déjà couvert par la recherche
+            # firebase_uid, mais on le traite proprement.
+            refresh_token = create_device_session(
+                db,
+                existing_email.id,
+                device_id=payload.device_id or "unknown",
+                device_name=payload.device_name,
+                platform=payload.platform,
             )
+
+            db.commit()
+            db.refresh(existing_email)
+
+            return {
+                "access_type": "firebase",
+                "is_new_user": False,
+                "user": existing_email,
+                "refresh_token": refresh_token,
+            }
 
         # ============================================================
         # 5. VÉRIFIER LE TÉLÉPHONE
@@ -449,6 +493,15 @@ def register_email(
             new_user_data,
         )
 
+        db.flush()
+
+        logger.info(
+            "Utilisateur GANSEKOU créé en mémoire "
+            "user_id=%s firebase_uid=%s",
+            new_user.id,
+            firebase_uid,
+        )
+
         # ============================================================
         # 7. CRÉER LA SESSION
         # ============================================================
@@ -462,8 +515,19 @@ def register_email(
         )
 
         # ============================================================
-        # 8. SUCCÈS
+        # 8. COMMIT FINAL
         # ============================================================
+
+        db.commit()
+        db.refresh(new_user)
+
+        logger.info(
+            "INSCRIPTION GANSEKOU RÉUSSIE "
+            "user_id=%s firebase_uid=%s email=%s",
+            new_user.id,
+            firebase_uid,
+            email,
+        )
 
         return {
             "access_type": "firebase",
@@ -547,7 +611,6 @@ def register_email(
                 ),
             },
         )
-
 
 @router.post(
     "/refresh",
