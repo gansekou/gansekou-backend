@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.models.content import Content
 from app.models.content_level import ContentLevel
-from app.models.quiz import Quiz
+from app.models.quiz import Quiz, QuizLevel
 from app.models.teacher_subject import TeacherSubject
 from app.models.user import User
 
@@ -72,9 +72,12 @@ def get_teacher_subject_ids(
     return [
         row.subject_id
         for row in (
-            db.query(TeacherSubject.subject_id)
+            db.query(
+                TeacherSubject.subject_id
+            )
             .filter(
-                TeacherSubject.teacher_id == user.id
+                TeacherSubject.teacher_id
+                == user.id
             )
             .all()
         )
@@ -125,7 +128,8 @@ def restrict_content_query_by_user(
             query
             .join(
                 ContentLevel,
-                ContentLevel.content_id == Content.id,
+                ContentLevel.content_id
+                == Content.id,
             )
             .filter(
                 ContentLevel.level_id
@@ -149,7 +153,9 @@ def restrict_content_query_by_user(
             return query.filter(False)
 
         return query.filter(
-            Content.subject_id.in_(subject_ids)
+            Content.subject_id.in_(
+                subject_ids
+            )
         )
 
     # --------------------------------------------------------
@@ -168,18 +174,56 @@ def restrict_quiz_query_by_user(
     current_user: User,
     db: Session,
 ):
+    """
+    Restreint les quiz accessibles selon le rôle.
+
+    ELEVE:
+        Le quiz doit être associé au niveau de l'élève
+        via la table quiz_levels.
+
+        Un quiz peut être associé à UN ou PLUSIEURS niveaux.
+
+    ENSEIGNANT:
+        Le quiz doit appartenir à une matière enseignée
+        par l'enseignant.
+
+    ADMIN:
+        Accès complet.
+    """
+
+    # --------------------------------------------------------
+    # ADMIN / PROMOTEUR / ADMINISTRATEUR
+    # --------------------------------------------------------
+
     if is_admin_role(current_user):
         return query
+
+    # --------------------------------------------------------
+    # ELEVE
+    # --------------------------------------------------------
 
     if current_user.role == STUDENT_ROLE:
 
         if not current_user.level_id:
             return query.filter(False)
 
-        return query.filter(
-            Quiz.level_id
-            == current_user.level_id
+        return (
+            query
+            .join(
+                QuizLevel,
+                QuizLevel.quiz_id
+                == Quiz.id,
+            )
+            .filter(
+                QuizLevel.level_id
+                == current_user.level_id
+            )
+            .distinct()
         )
+
+    # --------------------------------------------------------
+    # ENSEIGNANT
+    # --------------------------------------------------------
 
     if current_user.role in TEACHER_ROLES:
 
@@ -192,8 +236,14 @@ def restrict_quiz_query_by_user(
             return query.filter(False)
 
         return query.filter(
-            Quiz.subject_id.in_(subject_ids)
+            Quiz.subject_id.in_(
+                subject_ids
+            )
         )
+
+    # --------------------------------------------------------
+    # AUTRES ROLES
+    # --------------------------------------------------------
 
     return query.filter(False)
 
@@ -234,14 +284,16 @@ def require_content_allowed_for_user(
                 ),
             )
 
-        # IMPORTANT :
-        # Le contenu peut maintenant avoir plusieurs niveaux.
+        # ----------------------------------------------------
+        # Le contenu peut avoir plusieurs niveaux.
         #
-        # db_content.levels contient tous les niveaux
-        # associés au contenu.
+        # Content.levels contient les niveaux associés
+        # au contenu.
+        # ----------------------------------------------------
 
         allowed = any(
-            level.id == current_user.level_id
+            level.id
+            == current_user.level_id
             for level in db_content.levels
         )
 
@@ -269,7 +321,10 @@ def require_content_allowed_for_user(
             )
         )
 
-        if db_content.subject_id not in subject_ids:
+        if (
+            db_content.subject_id
+            not in subject_ids
+        ):
             raise HTTPException(
                 status_code=403,
                 detail=(
@@ -299,8 +354,30 @@ def require_quiz_allowed_for_user(
     current_user: User,
     quiz: Quiz,
 ):
+    """
+    Vérifie qu'un utilisateur a le droit d'accéder
+    à un quiz précis.
+
+    Un quiz peut être associé à UN ou PLUSIEURS niveaux.
+
+    Pour un élève, l'accès est autorisé si son niveau
+    figure dans quiz_levels.
+
+    Une compatibilité avec l'ancien level_id est conservée
+    pour les anciens quiz qui n'auraient pas encore été
+    migrés vers quiz_levels.
+    """
+
+    # --------------------------------------------------------
+    # ADMIN / PROMOTEUR / ADMINISTRATEUR
+    # --------------------------------------------------------
+
     if is_admin_role(current_user):
         return
+
+    # --------------------------------------------------------
+    # ELEVE
+    # --------------------------------------------------------
 
     if current_user.role == STUDENT_ROLE:
 
@@ -313,7 +390,35 @@ def require_quiz_allowed_for_user(
                 ),
             )
 
-        if quiz.level_id != current_user.level_id:
+        # ----------------------------------------------------
+        # NOUVEAU SYSTÈME :
+        # quiz_levels
+        # ----------------------------------------------------
+
+        allowed = any(
+            quiz_level.level_id
+            == current_user.level_id
+            for quiz_level
+            in quiz.quiz_levels
+        )
+
+        # ----------------------------------------------------
+        # COMPATIBILITÉ ANCIENS QUIZ
+        #
+        # Certains anciens quiz peuvent encore avoir
+        # uniquement quizzes.level_id.
+        # ----------------------------------------------------
+
+        if (
+            not allowed
+            and quiz.level_id is not None
+        ):
+            allowed = (
+                quiz.level_id
+                == current_user.level_id
+            )
+
+        if not allowed:
             raise HTTPException(
                 status_code=403,
                 detail=(
@@ -324,6 +429,10 @@ def require_quiz_allowed_for_user(
 
         return
 
+    # --------------------------------------------------------
+    # ENSEIGNANT
+    # --------------------------------------------------------
+
     if current_user.role in TEACHER_ROLES:
 
         subject_ids = set(
@@ -333,7 +442,10 @@ def require_quiz_allowed_for_user(
             )
         )
 
-        if quiz.subject_id not in subject_ids:
+        if (
+            quiz.subject_id
+            not in subject_ids
+        ):
             raise HTTPException(
                 status_code=403,
                 detail=(
@@ -343,6 +455,10 @@ def require_quiz_allowed_for_user(
             )
 
         return
+
+    # --------------------------------------------------------
+    # AUTRES
+    # --------------------------------------------------------
 
     raise HTTPException(
         status_code=403,
