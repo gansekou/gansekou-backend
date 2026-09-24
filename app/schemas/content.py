@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -8,6 +8,14 @@ from app.core.content_access import normalize_content_type
 from app.schemas.common import ORMBaseSchema
 from app.schemas.content_translation import ContentTranslationResponse
 
+ContentFormat = Literal[
+    "TEXT",
+    "PDF",
+    "AUDIO",
+    "VIDEO",
+    "IMAGE",
+    "EXTERNAL",
+]
 
 class ContentCreate(BaseModel):
     author_id: UUID
@@ -22,6 +30,10 @@ class ContentCreate(BaseModel):
     )
 
     content_type: str
+
+    content_format: ContentFormat = "PDF"
+
+    content_details: str | None = None
 
     related_content_ids: list[UUID] = Field(
         default_factory=list
@@ -68,6 +80,11 @@ class ContentResponse(ORMBaseSchema):
     )
 
     content_type: str
+
+    content_format: ContentFormat = "PDF"
+
+    content_details: str | None = None
+
 
     file_url: str | None = None
     thumbnail_url: str | None = None
@@ -147,6 +164,18 @@ class ContentResponse(ORMBaseSchema):
 
                 "content_type": data.content_type,
 
+                "content_format": getattr(
+                    data,
+                    "content_format",
+                    "PDF",
+                ),
+                
+                "content_details": getattr(
+                    data,
+                    "content_details",
+                    None,
+                ),
+                
                 "file_url": getattr(
                     data,
                     "file_url",
