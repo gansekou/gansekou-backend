@@ -50,6 +50,23 @@ class Content(Base):
         index=True
     )
 
+    # Format de présentation du contenu
+    # TEXT, PDF, AUDIO, VIDEO, IMAGE, EXTERNAL
+    content_format: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="PDF",
+        server_default="PDF",
+        index=True,
+    )
+    
+    # Contenu pédagogique en Markdown
+    # Les formules mathématiques peuvent utiliser KaTeX
+    content_details: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
     # DRAFT / PUBLISHED / ARCHIVED
     status: Mapped[str] = mapped_column(
         String(30),
