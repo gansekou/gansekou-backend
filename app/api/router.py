@@ -15,6 +15,7 @@ from app.api.routes import content_progress
 from app.api.routes import payments
 from app.api.routes import statistics
 from app.api.routes import chat
+from app.api.routes import public_seo
 
 from app.api.routes import auth, users, schools, education, contents, questions, notifications, sync
 
@@ -107,6 +108,12 @@ api_router.include_router(
     chat.router,
     prefix="/chat",
     tags=["Chat"]
+)
+
+api_router.include_router(
+    public_seo.router,
+    prefix="/public/seo",
+    tags=["Public SEO"],
 )
 
 
