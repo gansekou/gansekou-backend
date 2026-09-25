@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.database.session import get_db
 from app.models.content import Content
+from app.models.content_translation import ContentTranslation
 from app.schemas.public_seo import PublicSeoContentResponse
 
 
@@ -19,10 +20,10 @@ def get_public_seo_content(
     content_id: UUID,
     db: Session = Depends(get_db),
 ):
+    # 1. Récupérer le contenu approuvé
     db_content = (
         db.query(Content)
         .options(
-            selectinload(Content.translations),
             selectinload(Content.subject),
             selectinload(Content.levels),
             selectinload(Content.specialties),
@@ -40,32 +41,47 @@ def get_public_seo_content(
             detail="Contenu public introuvable",
         )
 
-    translations = db_content.translations or []
+    # 2. Récupérer directement les traductions du contenu
+    translations = (
+        db.query(ContentTranslation)
+        .filter(
+            ContentTranslation.content_id == db_content.id
+        )
+        .all()
+    )
 
+    if not translations:
+        raise HTTPException(
+            status_code=404,
+            detail="Aucune traduction trouvée pour ce contenu",
+        )
+
+    # 3. Priorité à la traduction française
     translation = next(
         (
             item
             for item in translations
-            if item.language.lower() == "fr"
+            if item.language
+            and item.language.upper() == "FR"
         ),
         None,
     )
 
+    # 4. Sinon, utiliser la traduction anglaise
     if translation is None:
         translation = next(
             (
                 item
                 for item in translations
-                if item.language.lower() == "en"
+                if item.language
+                and item.language.upper() == "EN"
             ),
             None,
         )
 
+    # 5. Sinon, utiliser la première traduction disponible
     if translation is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Traduction publique introuvable",
-        )
+        translation = translations[0]
 
     subject = db_content.subject
 
