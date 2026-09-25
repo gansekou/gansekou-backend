@@ -1,3 +1,4 @@
+import re
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -10,6 +11,66 @@ from app.schemas.public_seo import PublicSeoContentResponse
 
 
 router = APIRouter()
+
+
+def extract_text_title(content_details: str | None) -> str | None:
+    """
+    Extrait un titre à partir du début d'un contenu TEXT.
+    """
+
+    if not content_details:
+        return None
+
+    lines = [
+        line.strip()
+        for line in content_details.splitlines()
+        if line.strip()
+    ]
+
+    if not lines:
+        return None
+
+    title = lines[0]
+
+    # Nettoyage des espaces multiples
+    title = re.sub(r"\s+", " ", title).strip()
+
+    # Limite raisonnable pour un titre SEO
+    if len(title) > 160:
+        title = title[:157].rstrip() + "..."
+
+    return title or None
+
+
+def build_text_description(
+    content_details: str | None,
+    title: str,
+) -> str | None:
+    """
+    Crée une description SEO à partir du contenu TEXT.
+    """
+
+    if not content_details:
+        return None
+
+    description = re.sub(
+        r"\s+",
+        " ",
+        content_details,
+    ).strip()
+
+    # Éviter de répéter le titre au début de la description
+    if description.startswith(title):
+        description = description[len(title):].strip()
+
+    if not description:
+        return title
+
+    # Limite adaptée à une description SEO
+    if len(description) > 300:
+        description = description[:297].rstrip() + "..."
+
+    return description
 
 
 @router.get(
@@ -41,7 +102,7 @@ def get_public_seo_content(
             detail="Contenu public introuvable",
         )
 
-    # 2. Récupérer directement les traductions du contenu
+    # 2. Récupérer les traductions existantes
     translations = (
         db.query(ContentTranslation)
         .filter(
@@ -50,13 +111,6 @@ def get_public_seo_content(
         .all()
     )
 
-    if not translations:
-        raise HTTPException(
-            status_code=404,
-            detail="Aucune traduction trouvée pour ce contenu",
-        )
-
-    # 3. Priorité à la traduction française
     translation = next(
         (
             item
@@ -67,7 +121,6 @@ def get_public_seo_content(
         None,
     )
 
-    # 4. Sinon, utiliser la traduction anglaise
     if translation is None:
         translation = next(
             (
@@ -79,19 +132,51 @@ def get_public_seo_content(
             None,
         )
 
-    # 5. Sinon, utiliser la première traduction disponible
-    if translation is None:
+    if translation is None and translations:
         translation = translations[0]
+
+    # 3. Définir le titre et la description
+    if translation is not None:
+        title = translation.title
+
+        description = (
+            translation.description
+            or translation.short_description
+        )
+
+    elif db_content.content_format == "TEXT":
+        title = extract_text_title(
+            db_content.content_details
+        )
+
+        if not title:
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    "Le contenu TEXT ne possède pas "
+                    "de titre exploitable"
+                ),
+            )
+
+        description = build_text_description(
+            db_content.content_details,
+            title,
+        )
+
+    else:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "Aucune traduction trouvée pour ce contenu"
+            ),
+        )
 
     subject = db_content.subject
 
     return PublicSeoContentResponse(
         id=db_content.id,
-        title=translation.title,
-        description=(
-            translation.description
-            or translation.short_description
-        ),
+        title=title,
+        description=description,
         content_type=db_content.content_type,
         content_format=db_content.content_format,
         subject_name=(
