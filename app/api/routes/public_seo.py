@@ -26,16 +26,10 @@ def get_public_seo_content(
             selectinload(Content.subject),
             selectinload(Content.levels),
             selectinload(Content.specialties),
-        ),
-            selectinload(Content.levels),
-            selectinload(Content.specialties),
         )
         .filter(
             Content.id == content_id,
             Content.status == "APPROVED",
-            Content.content_type.in_(
-                ["COURS", "EXERCICE", "SUJET"]
-            ),
         )
         .first()
     )
