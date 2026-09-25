@@ -23,9 +23,10 @@ def get_public_seo_content(
         db.query(Content)
         .options(
             selectinload(Content.translations),
-            selectinload(Content.subject).selectinload(
-                lambda subject: subject.level
-            ),
+            selectinload(Content.subject),
+            selectinload(Content.levels),
+            selectinload(Content.specialties),
+        ),
             selectinload(Content.levels),
             selectinload(Content.specialties),
         )
