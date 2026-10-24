@@ -13,6 +13,7 @@ from app.api.routes import gamification
 from app.api.routes import study_planner
 from app.api.routes import content_progress
 from app.api.routes import payments
+from app.api.routes import admin_subscriptions
 from app.api.routes import statistics
 from app.api.routes import chat
 from app.api.routes import public_seo
@@ -96,6 +97,12 @@ api_router.include_router(
     payments.router,
     prefix="/payments",
     tags=["Payments"]
+)
+
+api_router.include_router(
+    admin_subscriptions.router,
+    prefix="/payments",
+    tags=["Admin Subscriptions"],
 )
 
 api_router.include_router(
