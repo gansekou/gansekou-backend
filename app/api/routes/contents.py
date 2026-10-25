@@ -381,6 +381,7 @@ def get_contents_by_subject(
     )
 
 
+
 @router.post("/translations", response_model=ContentTranslationResponse)
 def create_content_translation(
     payload: ContentTranslationCreate,
@@ -390,15 +391,34 @@ def create_content_translation(
     db_content = content.get(db, payload.content_id)
 
     if not db_content:
-        raise HTTPException(status_code=404, detail="Contenu introuvable")
+        raise HTTPException(
+            status_code=404,
+            detail="Contenu introuvable",
+        )
 
-    if current_user.role in TEACHER_CREATOR_ROLES and db_content.author_id != current_user.id:
+    if (
+        current_user.role in TEACHER_CREATOR_ROLES
+        and db_content.author_id != current_user.id
+    ):
         raise HTTPException(
             status_code=403,
             detail="Un enseignant ne peut traduire que ses propres contenus",
         )
 
-    return content_translation.create(db, payload)
+    try:
+        db_translation = content_translation.create(db, payload)
+
+        # Valider l'enregistrement de la traduction en base.
+        db.commit()
+        db.refresh(db_translation)
+
+        return db_translation
+
+    except Exception:
+        # Annuler la transaction en cas d'erreur.
+        db.rollback()
+        raise
+
 
 
 @router.put("/translations/{translation_id}", response_model=ContentTranslationResponse)
