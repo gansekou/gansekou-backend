@@ -151,3 +151,99 @@ def admin_activate_subscription(
                 "Aucune modification n’a été confirmée."
             ),
         ) from exc
+
+
+
+
+@router.get("/admin/users/{user_id}/subscription-status")
+def get_user_subscription_status(
+    user_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    # Protection serveur : seul PROMOTEUR peut consulter ce statut.
+    if current_user.role != "PROMOTEUR":
+        raise HTTPException(
+            status_code=403,
+            detail="Seul le promoteur peut consulter le statut Premium d’un utilisateur.",
+        )
+
+    target_user = (
+        db.query(User)
+        .filter(User.id == user_id)
+        .first()
+    )
+
+    if target_user is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Utilisateur introuvable.",
+        )
+
+    now = datetime.now(timezone.utc)
+
+    subscriptions = (
+        db.query(UserSubscription)
+        .filter(
+            UserSubscription.user_id == target_user.id,
+            UserSubscription.status == "ACTIVE",
+        )
+        .order_by(UserSubscription.expires_at.desc())
+        .all()
+    )
+
+    active_subscription = None
+
+    for subscription in subscriptions:
+        expiration = subscription.expires_at
+
+        # Compatibilité avec les dates sans fuseau horaire.
+        if expiration.tzinfo is None:
+            expiration = expiration.replace(tzinfo=timezone.utc)
+
+        if expiration > now:
+            active_subscription = subscription
+            break
+
+    if active_subscription is None:
+        return {
+            "user_id": str(target_user.id),
+            "is_premium": False,
+            "subscription": None,
+            "remaining_seconds": 0,
+            "remaining_days": 0,
+        }
+
+    expiration = active_subscription.expires_at
+
+    if expiration.tzinfo is None:
+        expiration = expiration.replace(tzinfo=timezone.utc)
+
+    remaining_seconds = max(
+        0,
+        int((expiration - now).total_seconds()),
+    )
+
+    remaining_days = (
+        remaining_seconds + 86399
+    ) // 86400
+
+    plan = active_subscription.plan
+
+    return {
+        "user_id": str(target_user.id),
+        "is_premium": True,
+        "subscription": {
+            "id": str(active_subscription.id),
+            "status": active_subscription.status,
+            "plan_id": str(active_subscription.plan_id),
+            "plan_name": plan.name if plan else None,
+            "period": plan.period if plan else None,
+            "starts_at": active_subscription.starts_at.isoformat(),
+            "expires_at": expiration.isoformat(),
+            "auto_renew": active_subscription.auto_renew,
+        },
+        "remaining_seconds": remaining_seconds,
+        "remaining_days": remaining_days,
+    }
+
