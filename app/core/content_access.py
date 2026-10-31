@@ -26,8 +26,8 @@ OFFICIAL_CONTENT_TYPES = {
     "COURS",
     "EXERCICE",
     "SUJET",
+    "LIVRE",
 }
-
 
 CONTENT_TYPE_ALIASES = {
     "COURSE": "COURS",
@@ -45,6 +45,10 @@ CONTENT_TYPE_ALIASES = {
     "EPREUVE": "SUJET",
     "EXAM": "SUJET",
     "SUJET": "SUJET",
+
+    "BOOK": "LIVRE",
+    "BOOKS": "LIVRE",
+    "LIVRE": "LIVRE",
 }
 
 
