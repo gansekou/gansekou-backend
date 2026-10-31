@@ -53,7 +53,14 @@ def restrict_premium_query(query, db: Session, current_user):
 
 
 def restrict_public_content_query(query, db: Session, current_user):
-    query = query.filter(content.model.content_type.in_(["COURS", "EXERCICE", "SUJET"]))
+    query = query.filter(
+        content.model.content_type.in_([
+            "COURS",
+            "EXERCICE",
+            "SUJET",
+            "LIVRE",
+        ])
+    )
     query = restrict_content_query_by_user(query, current_user, db)
     return query
 
